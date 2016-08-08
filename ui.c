@@ -1,5 +1,9 @@
 #include "ui.h"
+#include <errno.h>
+#include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include <sys/time.h>
 #include <pthread.h>
@@ -29,6 +33,15 @@ static int row, col, p = 0;
 static int dirty = 0;
 static char status[256];
 
+void uiperror(const char *str)
+{
+	pthread_mutex_lock(&gevlock);
+	snprintf(status, 256, "%s: %s\n", str, strerror(errno));
+	dirty |= EV_STATUS;
+	pthread_cond_signal(&gevpush);
+	pthread_mutex_unlock(&gevlock);
+}
+
 void uistatus(const char *str)
 {
 	pthread_mutex_lock(&gevlock);
@@ -37,6 +50,18 @@ void uistatus(const char *str)
 	dirty |= EV_STATUS;
 	pthread_cond_signal(&gevpush);
 	pthread_mutex_unlock(&gevlock);
+}
+
+void uistatusf(const char *format, ...)
+{
+	va_list args;
+	va_start(args, format);
+	pthread_mutex_lock(&gevlock);
+	vsnprintf(status, 256, format, args);
+	dirty |= EV_STATUS;
+	pthread_cond_signal(&gevpush);
+	pthread_mutex_unlock(&gevlock);
+	va_end(args);
 }
 
 static void color(unsigned fg, unsigned bg)
