@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include "client.h"
+#include "ui.h"
 #include "net.h"
 
 static int sock = -1;
@@ -39,6 +40,16 @@ int cmain(void)
 	sa.sin_port = htobe16(cfg.port);
 	if (pthread_create(&t_net, NULL, netmain, NULL) != 0) {
 		perror("netmain");
+		goto fail;
+	}
+	ret = uimain();
+	if (ret) {
+		perror("uimain");
+		goto fail;
+	}
+	ret = 1;
+	if (pthread_cancel(t_net) != 0) {
+		perror("pthread_cancel");
 		goto fail;
 	}
 	if (pthread_join(t_net, NULL) != 0) {

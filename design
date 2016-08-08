@@ -1,0 +1,6 @@
+default interface: ncurses textual
+
+threading:
+two threads:
+main thread spawns network thread and processes all events
+network thread receives all data

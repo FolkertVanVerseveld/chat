@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include "server.h"
+#include "ui.h"
 #include "net.h"
 
 static int ssock = -1, client = -1;
@@ -24,7 +25,7 @@ static void *netmain(void *arg)
 		net_err = 1;
 		return NULL;
 	}
-	puts("accept");
+	uistatus("accept");
 	return NULL;
 }
 
@@ -51,6 +52,16 @@ int smain(void)
 	listen(ssock, BACKLOG);
 	if (pthread_create(&t_net, NULL, netmain, NULL) != 0) {
 		perror("netmain");
+		goto fail;
+	}
+	ret = uimain();
+	if (ret) {
+		perror("uimain");
+		goto fail;
+	}
+	ret = 1;
+	if (pthread_cancel(t_net) != 0) {
+		perror("pthread_cancel");
 		goto fail;
 	}
 	if (pthread_join(t_net, NULL) != 0) {
