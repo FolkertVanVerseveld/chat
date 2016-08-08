@@ -1,5 +1,6 @@
 #include "ui.h"
 #include <errno.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -8,6 +9,7 @@
 #include <sys/time.h>
 #include <pthread.h>
 #include <ncurses.h>
+#include "net.h"
 
 #define COL_BLACK 0
 #define COL_RED 1
@@ -28,16 +30,53 @@ static pthread_mutex_t gevlock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t  gevpush = PTHREAD_COND_INITIALIZER;
 static int row, col, p = 0;
 
+#define HA_OTHER 1
+
 #define EV_STATUS 1
+#define EV_ERROR 2
+#define EV_TEXT 4
+
+#define STATSZ 256
+#define ERRSZ 256
+
+#define HISTSZ 8
 
 static int dirty = 0;
-static char status[256];
+static char status[STATSZ], error[ERRSZ];
+static char text[N_TEXTSZ];
+static unsigned textp = 0;
+
+static char hist[HISTSZ][N_TEXTSZ];
+static unsigned hista[HISTSZ];
+static unsigned histn = 0, histi = 0;
+// current position is computed as (histi + histn) % HISTSZ
+
+static void histadd(const char *str, unsigned attr)
+{
+	unsigned i = (histi + histn) % HISTSZ;
+	strncpy(hist[i], str, N_TEXTSZ);
+	hist[i][N_TEXTSZ - 1] = '\0';
+	hista[i] = attr;
+	if (histn < HISTSZ)
+		++histn;
+	else
+		histi = (histi + 1) % HISTSZ;
+	dirty |= EV_TEXT;
+}
+
+void uitext(const char *str)
+{
+	pthread_mutex_lock(&gevlock);
+	histadd(str, HA_OTHER);
+	pthread_cond_signal(&gevpush);
+	pthread_mutex_unlock(&gevlock);
+}
 
 void uiperror(const char *str)
 {
 	pthread_mutex_lock(&gevlock);
-	snprintf(status, 256, "%s: %s\n", str, strerror(errno));
-	dirty |= EV_STATUS;
+	snprintf(error, ERRSZ, "%s: %s\n", str, strerror(errno));
+	dirty |= EV_ERROR;
 	pthread_cond_signal(&gevpush);
 	pthread_mutex_unlock(&gevlock);
 }
@@ -45,8 +84,8 @@ void uiperror(const char *str)
 void uistatus(const char *str)
 {
 	pthread_mutex_lock(&gevlock);
-	strncpy(status, str, 256);
-	status[255] = '\0';
+	strncpy(status, str, STATSZ);
+	status[STATSZ - 1] = '\0';
 	dirty |= EV_STATUS;
 	pthread_cond_signal(&gevpush);
 	pthread_mutex_unlock(&gevlock);
@@ -57,11 +96,42 @@ void uistatusf(const char *format, ...)
 	va_list args;
 	va_start(args, format);
 	pthread_mutex_lock(&gevlock);
-	vsnprintf(status, 256, format, args);
+	vsnprintf(status, STATSZ, format, args);
 	dirty |= EV_STATUS;
 	pthread_cond_signal(&gevpush);
 	pthread_mutex_unlock(&gevlock);
 	va_end(args);
+}
+
+void uierror(const char *err)
+{
+	pthread_mutex_lock(&gevlock);
+	strncpy(error, err, ERRSZ);
+	error[ERRSZ - 1] = '\0';
+	dirty |= EV_ERROR;
+	pthread_cond_signal(&gevpush);
+	pthread_mutex_unlock(&gevlock);
+}
+
+void uierrorf(const char *format, ...)
+{
+	va_list args;
+	va_start(args, format);
+	pthread_mutex_lock(&gevlock);
+	vsnprintf(error, ERRSZ, format, args);
+	dirty |= EV_ERROR;
+	pthread_cond_signal(&gevpush);
+	pthread_mutex_unlock(&gevlock);
+	va_end(args);
+}
+
+static void setcol(int col)
+{
+	if (p != col) {
+		attroff(COLOR_PAIR(p));
+		attron(COLOR_PAIR(col));
+		p = col;
+	}
 }
 
 static void color(unsigned fg, unsigned bg)
@@ -70,11 +140,7 @@ static void color(unsigned fg, unsigned bg)
 	if (col < 0) col = 0;
 	if (col >= COL_MAX)
 		col = COL_MAX;
-	if (p != col) {
-		attroff(COLOR_PAIR(p));
-		attron(COLOR_PAIR(col));
-		p = col;
-	}
+	setcol(col);
 }
 
 static void reshape(void)
@@ -89,6 +155,34 @@ static void reshape(void)
 	}
 	row = y;
 	col = x;
+}
+
+static void kbp(int key)
+{
+	unsigned t_dirty = 0;
+	int ch = key & 0xff;
+	if (key == 263 || ch == '\b') {
+		if (textp) {
+			text[--textp] = '\0';
+			t_dirty = 1;
+		}
+	} else if (ch == '\n' || ch == '\r') {
+		int ns = nettext(text);
+		histadd(text, 0);
+		text[textp = 0] = '\0';
+		t_dirty = 1;
+	} else if (isprint(ch)) {
+		if (textp < N_TEXTSZ - 1) {
+			text[textp++] = ch;
+			text[textp] = '\0';
+			t_dirty = 1;
+		}
+	}
+	if (t_dirty) {
+		mvaddstr(row - 2, 0, text);
+		clrtoeol();
+		refresh();
+	}
 }
 
 static void uifree(void)
@@ -133,6 +227,10 @@ static int uiinit(void)
 				err = "init_pair failed";
 				goto fail;
 			}
+	for (i = 0; i < HISTSZ; ++i) {
+		hist[i][0] = '\0';
+		hista[i] = 0;
+	}
 	return 0;
 fail:
 	uifree();
@@ -152,28 +250,49 @@ int uimain(void)
 	running = 1;
 	if (pthread_mutex_lock(&gevlock) != 0)
 		abort();
+	mvaddstr(0, 0, "F2:quit F3:send");
+	refresh();
 	while (running) {
 		if (gettimeofday(&time, NULL) != 0)
 			goto unlock;
 		delta.tv_sec = time.tv_sec;
-		delta.tv_nsec = time.tv_usec * 1000LU + 200 * 1000000LU;
+		delta.tv_nsec = time.tv_usec + 50 * 1000000LU;
 		ret = pthread_cond_timedwait(&gevpush, &gevlock, &delta);
-		if (dirty & EV_STATUS) {
-			mvaddstr(0, 0, status);
+		if (dirty & EV_ERROR) {
+			int col = p;
+			color(COL_RED, COL_BLACK);
+			mvaddstr(row - 1, 0, error);
+			clrtoeol();
+			setcol(col);
+			dirty &= ~EV_ERROR;
+		} else if (dirty & EV_STATUS) {
+			mvaddstr(row - 1, 0, status);
 			clrtoeol();
 			dirty &= ~EV_STATUS;
 		}
-		mvaddch(1, 0, yay[i]);
+		if (dirty & EV_TEXT) {
+			for (unsigned j, i = 0; i < HISTSZ; ++i) {
+				j = (histi + histn + i) % HISTSZ;
+				const char *hdr = "  ";
+				if (hist[j][0] && !(hista[j] & HA_OTHER))
+					hdr = "me";
+				mvaddstr(i + 1, 0, hdr);
+				mvaddstr(i + 1, 3, hist[j]);
+				clrtoeol();
+			}
+		}
+		mvaddch(row - 1, col - 2, yay[i]);
 		i ^= 1;
 		clrtoeol();
 		refresh();
 		while ((key = getch()) != ERR) {
 			if (key == KEY_RESIZE)
 				reshape();
-			if (key == 'q') {
+			if (key == KEY_F(2)) {
 				running = 0;
 				break;
-			}
+			} else
+				kbp(key);
 		}
 	}
 unlock:

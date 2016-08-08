@@ -42,10 +42,10 @@ static void *netmain(void *arg)
 	if ((ns = netehlo(sock)) != NS_OK) {
 		switch (ns) {
 		case NS_LEFT:
-			uistatus("other left unexpectedly");
+			uierror("other left unexpectedly");
 			goto fail;
 		default:
-			uistatusf("network error: code %u", ns);
+			uierrorf("network error: code %u", ns);
 			goto fail;
 		}
 	}
@@ -55,10 +55,10 @@ static void *netmain(void *arg)
 		if (ns != NS_OK) {
 			switch (ns) {
 			case NS_LEFT:
-				uistatus("other left");
+				uierror("other left");
 				goto fail;
 			default:
-				uistatusf("network error: code %u", ns);
+				uierrorf("network error: code %u", ns);
 				goto fail;
 			}
 		}
@@ -69,6 +69,9 @@ static void *netmain(void *arg)
 			goto fail;
 		case NT_SALT:
 			netsalt(&pkg);
+			break;
+		case NT_TEXT:
+			uitext(pkg.data.text);
 			break;
 		default:
 			netcommerr(sock, &pkg, NE_TYPE);
@@ -97,6 +100,7 @@ int cmain(void)
 		perror("connect");
 		goto fail;
 	}
+	net_fd = sock;
 	if (pthread_create(&t_net, NULL, netmain, NULL) != 0) {
 		perror("netmain");
 		goto fail;

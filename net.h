@@ -15,12 +15,15 @@
 #define NT_ERR 1
 #define NT_EHLO 2
 #define NT_SALT 3
-#define NT_MAX 3
+#define NT_TEXT 4
+#define NT_MAX 4
 
 #define N_HDRSZ 16
 #define N_SALTSZ 64
+#define N_TEXTSZ 256
 
 extern int net_run; // XXX subject to race conditions if int is nonatomic
+extern int net_fd;
 
 struct npkg {
 	uint16_t length;
@@ -31,6 +34,7 @@ struct npkg {
 			uint8_t size;
 			char key[PASSSZ - 1]; // *not* \0 terminated!
 		} ehlo;
+		char text[N_TEXTSZ];
 		uint8_t salt[N_SALTSZ];
 	} data;
 };
@@ -45,12 +49,13 @@ int pkgin(struct npkg *pkg, int fd);
 int noclaim(int fd);
 int netcommerr(int fd, struct npkg *pkg, int code);
 void netperror(int code);
+int nettext(const char *text);
 
 #define nschk(x) \
 	if (x != NS_OK) {\
 		switch (x) {\
-		case NS_LEFT:uistatus("other left");goto fail;\
-		default:uistatusf("network error: code %u",x);goto fail;\
+		case NS_LEFT:uierror("other left");goto fail;\
+		default:uierrorf("network error: code %u",x);goto fail;\
 		}\
 	}
 
