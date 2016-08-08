@@ -5,6 +5,7 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <pthread.h>
+#include "chat.h"
 #include "client.h"
 #include "ui.h"
 #include "net.h"
@@ -12,29 +13,70 @@
 static int sock = -1;
 static struct sockaddr_in sa;
 static pthread_t t_net;
+static uint8_t salt[N_SALTSZ];
+
+static int netehlo(int fd)
+{
+	struct npkg pkg;
+	memset(&pkg, 0, sizeof pkg);
+	uistatus("authenticating...");
+	pkginit(&pkg, NT_EHLO);
+	size_t len = strlen(cfg.pass);
+	memcpy(pkg.data.ehlo.key, cfg.pass, PASSSZ - 1);
+	pkg.data.ehlo.size = len > 255 ? 255 : len;
+	return pkgout(&pkg, fd);
+}
+
+static void netsalt(struct npkg *pkg)
+{
+	memcpy(salt, pkg->data.salt, N_SALTSZ);
+}
 
 static void *netmain(void *arg)
 {
 	(void)arg;
 	struct npkg pkg;
+	int ns;
 	net_run = 1;
 	uistatus("connected");
+	if ((ns = netehlo(sock)) != NS_OK) {
+		switch (ns) {
+		case NS_LEFT:
+			uistatus("other left unexpectedly");
+			goto fail;
+		default:
+			uistatusf("network error: code %u", ns);
+			goto fail;
+		}
+	}
 	while (net_run) {
 		memset(&pkg, 0, sizeof pkg);
-		int ns = pkgin(&pkg, sock);
+		ns = pkgin(&pkg, sock);
 		if (ns != NS_OK) {
 			switch (ns) {
 			case NS_LEFT:
-				uistatus("other left\n");
-				net_run = 0;
-				break;
+				uistatus("other left");
+				goto fail;
 			default:
-				uistatusf("network error: code %u\n", ns);
-				goto end;
+				uistatusf("network error: code %u", ns);
+				goto fail;
 			}
 		}
+		switch (pkg.type) {
+		case NT_ERR:
+			netperror(pkg.code);
+			close(sock);
+			goto fail;
+		case NT_SALT:
+			netsalt(&pkg);
+			break;
+		default:
+			netcommerr(sock, &pkg, NE_TYPE);
+			close(sock);
+			goto fail;
+		}
 	}
-end:
+fail:
 	net_run = 0;
 	return NULL;
 }

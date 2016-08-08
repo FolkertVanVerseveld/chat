@@ -153,7 +153,6 @@ int uimain(void)
 	if (pthread_mutex_lock(&gevlock) != 0)
 		abort();
 	while (running) {
-		dirty = 0;
 		if (gettimeofday(&time, NULL) != 0)
 			goto unlock;
 		delta.tv_sec = time.tv_sec;
@@ -162,6 +161,7 @@ int uimain(void)
 		if (dirty & EV_STATUS) {
 			mvaddstr(0, 0, status);
 			clrtoeol();
+			dirty &= ~EV_STATUS;
 		}
 		mvaddch(1, 0, yay[i]);
 		i ^= 1;

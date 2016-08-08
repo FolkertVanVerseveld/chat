@@ -2,11 +2,10 @@
 #define CHAT_H
 
 #include <stdint.h>
+#include "config.h"
 
 #define MODE_SERVER 1
 #define MODE_CLIENT 2
-
-#define PASSSZ 256
 
 struct cfg {
 	unsigned mode;

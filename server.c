@@ -1,5 +1,7 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -13,36 +15,67 @@ static int ssock = -1, client = -1;
 static struct sockaddr_in sa, ca;
 static socklen_t cl;
 static pthread_t t_net;
+static uint8_t salt[N_SALTSZ];
+
+static int netehlo(int fd, struct npkg *p)
+{
+	struct npkg pkg;
+	size_t len;
+	len = strlen(cfg.pass);
+	if (len != p->data.ehlo.size || memcmp(p->data.ehlo.key, cfg.pass, len))
+		return netcommerr(fd, p, NE_KEY);
+	memset(&pkg, 0, sizeof pkg);
+	pkginit(&pkg, NT_SALT);
+	srand(time(NULL));
+	for (unsigned i = 0; i < N_SALTSZ; ++i)
+		salt[i] = rand();
+	memcpy(pkg.data.salt, salt, N_SALTSZ);
+	return pkgout(&pkg, fd);
+}
 
 static void *netmain(void *arg)
 {
 	(void)arg;
 	struct npkg pkg;
+	int ns;
 	net_run = 1;
-	uistatus("wait");
+	uistatus("waiting for client...");
 	cl = sizeof(struct sockaddr_in);
 	client = accept(ssock, (struct sockaddr*)&ca, (socklen_t*)&cl);
 	if (client < 0) {
 		uiperror("accept");
-		goto end;
+		goto fail;
 	}
-	uistatus("accept");
+	uistatus("client connected");
 	while (net_run) {
 		memset(&pkg, 0, sizeof pkg);
-		int ns = pkgin(&pkg, client);
+		ns = pkgin(&pkg, client);
 		if (ns != NS_OK) {
 			switch (ns) {
 			case NS_LEFT:
-				uistatus("other left\n");
-				net_run = 0;
-				break;
+				uistatus("other left");
+				goto fail;
 			default:
-				uistatusf("network error: code %u\n", ns);
-				goto end;
+				uistatusf("network error: code %u", ns);
+				goto fail;
 			}
 		}
+		switch (pkg.type) {
+		case NT_ERR:
+			netperror(pkg.code);
+			close(client);
+			goto fail;
+		case NT_EHLO:
+			ns = netehlo(client, &pkg);
+			nschk(ns);
+			break;
+		default:
+			netcommerr(client, &pkg, NE_TYPE);
+			close(client);
+			goto fail;
+		}
 	}
-end:
+fail:
 	net_run = 0;
 	return NULL;
 }

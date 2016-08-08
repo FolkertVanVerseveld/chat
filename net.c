@@ -12,10 +12,10 @@
 int net_run = 0;
 
 static const uint16_t nt_ltbl[NT_MAX + 1] = {
-	[NT_ACK] = 1,
-	[NT_ERR] = 1,
-	[NT_EHLO] = 1,
-	[NT_SALT] = 1,
+	[NT_ACK] = 0,
+	[NT_ERR] = 0,
+	[NT_EHLO] = PASSSZ,
+	[NT_SALT] = N_SALTSZ,
 };
 
 int pkgout(struct npkg *pkg, int fd)
@@ -116,4 +116,30 @@ int noclaim(int fd)
 	optname = SO_REUSEADDR;
 	optval = 1;
 	return setsockopt(fd, level, optname, &optval, sizeof(int));
+}
+
+int netcommerr(int fd, struct npkg *p, int code)
+{
+	struct npkg pkg;
+	switch (code) {
+	case NE_TYPE: uistatusf("bad pkg type: %hhu", p->type); break;
+	case NE_KEY: uistatus("bad authentication"); break;
+	default: uistatusf("network error: code %d", code); break;
+	}
+	memset(&pkg, 0, sizeof pkg);
+	pkginit(&pkg, NT_ERR);
+	pkg.code = (uint8_t)(code & 0xff);
+	return pkgout(&pkg, fd);
+}
+
+void netperror(int code)
+{
+	switch (code) {
+	case NE_KEY:
+		uistatus("authentication failed");
+		break;
+	default:
+		uistatusf("fatal error occurred: code %d", code);
+		break;
+	}
 }
