@@ -3,12 +3,30 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <pthread.h>
 #include "server.h"
 #include "net.h"
 
 static int ssock = -1, client = -1;
 static struct sockaddr_in sa, ca;
 static socklen_t cl;
+static pthread_t t_net;
+static int net_err = 0;
+
+static void *netmain(void *arg)
+{
+	(void)arg;
+	puts("wait");
+	cl = sizeof(struct sockaddr_in);
+	client = accept(ssock, (struct sockaddr*)&ca, (socklen_t*)&cl);
+	if (client < 0) {
+		perror("accept");
+		net_err = 1;
+		return NULL;
+	}
+	puts("accept");
+	return NULL;
+}
 
 int smain(void)
 {
@@ -31,14 +49,14 @@ int smain(void)
 		goto fail;
 	}
 	listen(ssock, BACKLOG);
-	puts("wait");
-	cl = sizeof(struct sockaddr_in);
-	client = accept(ssock, (struct sockaddr*)&ca, (socklen_t*)&cl);
-	if (client < 0) {
-		perror("accept");
+	if (pthread_create(&t_net, NULL, netmain, NULL) != 0) {
+		perror("netmain");
 		goto fail;
 	}
-	puts("accept");
+	if (pthread_join(t_net, NULL) != 0) {
+		perror("pthread_join");
+		goto fail;
+	}
 	ret = 0;
 fail:
 	if (client != -1)

@@ -3,11 +3,27 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <pthread.h>
 #include "client.h"
 #include "net.h"
 
 static int sock = -1;
 static struct sockaddr_in sa;
+static pthread_t t_net;
+static int net_err = 0;
+
+static void *netmain(void *arg)
+{
+	(void)arg;
+	puts("connecting");
+	if (connect(sock, (struct sockaddr*)&sa, sizeof sa) < 0) {
+		perror("connect");
+		net_err = 1;
+		return NULL;
+	}
+	puts("connected");
+	return NULL;
+}
 
 int cmain(void)
 {
@@ -21,8 +37,12 @@ int cmain(void)
 	sa.sin_addr.s_addr = inet_addr(cfg.address);
 	sa.sin_family = domain;
 	sa.sin_port = htobe16(cfg.port);
-	if (connect(sock, (struct sockaddr*)&sa, sizeof sa) < 0) {
-		perror("connect");
+	if (pthread_create(&t_net, NULL, netmain, NULL) != 0) {
+		perror("netmain");
+		goto fail;
+	}
+	if (pthread_join(t_net, NULL) != 0) {
+		perror("pthread_join");
 		goto fail;
 	}
 	ret = 0;
