@@ -8,9 +8,12 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include "ui.h"
+#include "serpent.h"
 
 int net_run = 0;
 int net_fd = -1;
+static int net_salt = 0;
+static serpent_ctx ctx;
 
 static const uint16_t nt_ltbl[NT_MAX + 1] = {
 	[NT_ACK] = 0,
@@ -22,11 +25,17 @@ static const uint16_t nt_ltbl[NT_MAX + 1] = {
 
 int pkgout(struct npkg *pkg, int fd)
 {
-	uint16_t length;
+	uint16_t length, t_length;
 	ssize_t n;
 	assert(pkg->type <= NT_MAX);
-	length = nt_ltbl[pkg->type] + N_HDRSZ;
+	t_length = nt_ltbl[pkg->type];
+	length = t_length + N_HDRSZ;
 	pkg->length = htobe16(length);
+	if (net_salt) {
+		struct npkg crypt;
+		serpent_encblk(&ctx, pkg, &crypt, length);
+		memcpy(pkg, &crypt, length);
+	}
 	while (length) {
 		n = send(fd, pkg, length, 0);
 		if (!n) return NS_LEFT;
@@ -81,6 +90,11 @@ int pkgin(struct npkg *pkg, int fd)
 	n = pkgread(fd, pkg, N_HDRSZ);
 	if (!n) return NS_LEFT;
 	if (n == -1 || n != N_HDRSZ) return NS_ERR;
+	if (net_salt) {
+		struct npkg crypt;
+		serpent_decblk(&ctx, pkg, &crypt, N_HDRSZ);
+		memcpy(pkg, &crypt, N_HDRSZ);
+	}
 	length = be16toh(pkg->length);
 	if (length < 4 || length > sizeof(struct npkg)) {
 		uierrorf("impossibru: length=%u\n", length);
@@ -95,6 +109,11 @@ int pkgin(struct npkg *pkg, int fd)
 	if (n == -1 || n != t_length) {
 		uierrorf("impossibru: n=%zu\n", n);
 		return NS_ERR;
+	}
+	if (net_salt) {
+		struct npkg crypt;
+		serpent_decblk(&ctx, &pkg->data, &crypt.data, t_length);
+		memcpy(&pkg->data, &crypt.data, t_length);
 	}
 	length -= N_HDRSZ;
 	if (length - N_HDRSZ > t_length)
@@ -154,4 +173,11 @@ int nettext(const char *text)
 	strncpy(pkg.data.text, text, N_TEXTSZ);
 	pkg.data.text[N_TEXTSZ - 1] = '\0';
 	return pkgout(&pkg, net_fd);
+}
+
+void ctx_init(const void *salt, size_t n)
+{
+	if (n > 256) n = 256;
+	serpent_init(&ctx, salt, n);
+	net_salt = 1;
 }

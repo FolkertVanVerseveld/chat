@@ -30,6 +30,8 @@ static int netehlo(int fd)
 static void netsalt(struct npkg *pkg)
 {
 	memcpy(salt, pkg->data.salt, N_SALTSZ);
+	ctx_init(salt, N_SALTSZ);
+	uistatus("connected to server");
 }
 
 static void *netmain(void *arg)

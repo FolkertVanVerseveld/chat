@@ -30,7 +30,9 @@ static int netehlo(int fd, struct npkg *p)
 	for (unsigned i = 0; i < N_SALTSZ; ++i)
 		salt[i] = rand();
 	memcpy(pkg.data.salt, salt, N_SALTSZ);
-	return pkgout(&pkg, fd);
+	int ret = pkgout(&pkg, fd);
+	ctx_init(salt, N_SALTSZ);
+	return ret;
 }
 
 static void *netmain(void *arg)

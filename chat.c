@@ -84,9 +84,13 @@ static int parse_opt(int argc, char **argv)
 		case 'a':
 			cfg.address = optarg;
 			break;
-		case 'k':
+		case 'k': {
 			strncpyz(cfg.pass, optarg, PASSSZ);
+			unsigned long hash;
+			hash = strhash(cfg.pass);
+			ctx_init(&hash, sizeof hash);
 			break;
+		}
 		}
 	}
 	return o_i;

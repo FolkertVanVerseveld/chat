@@ -51,6 +51,8 @@ int netcommerr(int fd, struct npkg *pkg, int code);
 void netperror(int code);
 int nettext(const char *text);
 
+void ctx_init(const void *salt, size_t n);
+
 #define nschk(x) \
 	if (x != NS_OK) {\
 		switch (x) {\

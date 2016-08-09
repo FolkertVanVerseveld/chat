@@ -39,7 +39,7 @@ static int row, col, p = 0;
 #define STATSZ 256
 #define ERRSZ 256
 
-#define HISTSZ 8
+#define HISTSZ 24
 
 static int dirty = 0;
 static char status[STATSZ], error[ERRSZ];
@@ -168,8 +168,10 @@ static void kbp(int key)
 		}
 	} else if (ch == '\n' || ch == '\r') {
 		int ns = nettext(text);
+		nschk(ns);
 		histadd(text, 0);
 		text[textp = 0] = '\0';
+	fail:
 		t_dirty = 1;
 	} else if (isprint(ch)) {
 		if (textp < N_TEXTSZ - 1) {
@@ -258,6 +260,7 @@ int uimain(void)
 		delta.tv_sec = time.tv_sec;
 		delta.tv_nsec = time.tv_usec + 50 * 1000000LU;
 		ret = pthread_cond_timedwait(&gevpush, &gevlock, &delta);
+		curs_set(0);
 		if (dirty & EV_ERROR) {
 			int col = p;
 			color(COL_RED, COL_BLACK);
@@ -284,6 +287,8 @@ int uimain(void)
 		mvaddch(row - 1, col - 2, yay[i]);
 		i ^= 1;
 		clrtoeol();
+		move(row - 2, textp);
+		curs_set(1);
 		refresh();
 		while ((key = getch()) != ERR) {
 			if (key == KEY_RESIZE)
