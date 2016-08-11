@@ -39,17 +39,37 @@ static int row, col, p = 0;
 #define STATSZ 256
 #define ERRSZ 256
 
-#define HISTSZ 24
+#define HISTSZ 256
 
 static int dirty = 0;
 static char status[STATSZ], error[ERRSZ];
 static char text[N_TEXTSZ];
 static unsigned textp = 0;
 
+#define COL_TXT 3
+
+#define B_ROW(y) (row-(y))
+#define B_TXT B_ROW(3)
+
 static char hist[HISTSZ][N_TEXTSZ];
-static unsigned hista[HISTSZ];
-static unsigned histn = 0, histi = 0;
+static unsigned hista[HISTSZ], histh[HISTSZ];
+static unsigned histn = 0, histi = 0, histy = 1, histyp, histip;
 // current position is computed as (histi + histn) % HISTSZ
+
+static void histcalc(void)
+{
+	unsigned sum = 0, i, j, h, c;
+	for (i = 0; i < HISTSZ; ++i) {
+		h = 1; c = col - COL_TXT;
+		for (const char *str = hist[i]; *str; ++str, --c)
+			if (!c || *str == '\n') {
+				c = col - COL_TXT;
+				++h;
+			}
+		sum += histh[i] = h;
+	}
+	histip = sum > B_TXT ? sum - B_TXT : 0;
+}
 
 static void histadd(const char *str, unsigned attr)
 {
@@ -62,6 +82,37 @@ static void histadd(const char *str, unsigned attr)
 	else
 		histi = (histi + 1) % HISTSZ;
 	dirty |= EV_TEXT;
+}
+
+static void wrapaddstr(unsigned y, unsigned x, unsigned d, char *str)
+{
+	if (d >= col) {
+		sprintf(error, "wrap error: d > col: d=%u,col=%u", d, col);
+		dirty |= EV_ERROR;
+		return;
+	}
+	unsigned c = col - d;
+	size_t len = strlen(str);
+	// don't bother doing complicated things if
+	// we can do it the easy and simple way
+	if (len < c) {
+		mvaddstr(y, x, str);
+		clrtoeol();
+		return;
+	}
+	char *old = str;
+	for (; *str; ++str, --c)
+		if (!c || *str == '\n') {
+			c = col - d;
+			int tmp = *str;
+			*str = '\0';
+			mvaddstr(y, x, old);
+			old = str;
+			*str = tmp;
+			++y;
+		}
+	if (*old)
+		mvaddstr(y, x, old);
 }
 
 void uitext(const char *str)
@@ -143,18 +194,27 @@ static void color(unsigned fg, unsigned bg)
 	setcol(col);
 }
 
+static void uihdr(void)
+{
+	mvaddstr(0, 0, "F2:quit F3:send");
+	refresh();
+}
+
 static void reshape(void)
 {
 	int y, x;
 	getmaxyx(scr, y, x);
+	clear();
 	if (y < ROW_MIN || x < COL_MIN) {
-		clear();
 		mvaddstr(0, 0, "tty too small");
 		refresh();
 		napms(1500);
 	}
 	row = y;
 	col = x;
+	dirty |= EV_STATUS | EV_TEXT;
+	uihdr();
+	histcalc();
 }
 
 static void kbp(int key)
@@ -215,7 +275,7 @@ static int uiinit(void)
 	keypad(scr, TRUE);
 	noecho();
 	nonl();
-	halfdelay(4);
+	halfdelay(3);
 	clear();
 	unsigned fc, bc, p, i;
 	for (bc = 0, i = p = 1, fc = COL_COUNT - 2; i < COL_COUNT; ++i, --fc, ++p)
@@ -252,8 +312,7 @@ int uimain(void)
 	running = 1;
 	if (pthread_mutex_lock(&gevlock) != 0)
 		abort();
-	mvaddstr(0, 0, "F2:quit F3:send");
-	refresh();
+	uihdr();
 	while (running) {
 		if (gettimeofday(&time, NULL) != 0)
 			goto unlock;
@@ -274,13 +333,20 @@ int uimain(void)
 			dirty &= ~EV_STATUS;
 		}
 		if (dirty & EV_TEXT) {
-			for (unsigned j, i = 0; i < HISTSZ; ++i) {
+			histcalc();
+			unsigned i, j, y;
+			for (i = histip, y = 1; i < HISTSZ; ++i) {
 				j = (histi + histn + i) % HISTSZ;
 				const char *hdr = "  ";
 				if (hist[j][0] && !(hista[j] & HA_OTHER))
 					hdr = "me";
-				mvaddstr(i + 1, 0, hdr);
-				mvaddstr(i + 1, 3, hist[j]);
+				mvaddstr(y, 0, hdr);
+				wrapaddstr(y, COL_TXT, COL_TXT, hist[j]);
+				y += histh[j];
+				clrtoeol();
+			}
+			for (; y <= B_TXT; ++y) {
+				move(y, 0);
 				clrtoeol();
 			}
 		}
