@@ -9,6 +9,7 @@
 #include <sys/time.h>
 #include <pthread.h>
 #include <ncurses.h>
+#include "fs.h"
 #include "string.h"
 #include "net.h"
 
@@ -64,6 +65,9 @@ static unsigned histn = 0, histi = 0, histip;
 static unsigned menu = M_MAIN;
 
 static void goto_menu(unsigned m);
+
+struct ls ls;
+static unsigned io_filei = 0, io_select = 0;
 
 // default behavior causes deadlock when run in UI thread
 #undef nschk
@@ -281,6 +285,16 @@ static void reshape(void)
 	move(row - 2, textp);
 }
 
+static void filefilter(void)
+{
+	io_select = ls.n;
+	for (unsigned i = 0; i < ls.n; ++i)
+		if (!strncmp(text, ls.list[i]->d_name, textp)) {
+			io_select = i;
+			return;
+		}
+}
+
 static int kbp_send()
 {
 	if (net_fd == -1) {
@@ -306,6 +320,25 @@ fail:
 
 static int kbp_select()
 {
+	if (io_select >= ls.n || !strcmp(ls.list[io_select]->d_name, ".")) {
+		struct dirent *e = ls.list[io_select];
+		if (d_isdir(e) && !ls_cd(&ls, e->d_name)) {
+			text[textp = 0] = '\0';
+			return 1;
+		}
+		strstatus("send aborted");
+	} else {
+		struct dirent *e = ls.list[io_select];
+		if (d_isdir(e)) {
+			if (!ls_cd(&ls, e->d_name)) {
+				text[textp = 0] = '\0';
+				return 1;
+			}
+			strerr("internal error");
+			return 0;
+		}
+		statusf("TODO send \"%s\" from %s", e->d_name, ls.path);
+	}
 	goto_menu(M_MAIN);
 	return 1;
 }
@@ -329,6 +362,8 @@ static void kbp(int key)
 		}
 	}
 	if (t_dirty) {
+		if (menu == M_FILE)
+			filefilter();
 		mvaddstr(row - 2, 0, text);
 		clrtoeol();
 		refresh();
@@ -337,6 +372,7 @@ static void kbp(int key)
 
 static void uifree(void)
 {
+	ls_free(&ls);
 	if (scr) {
 		delwin(scr);
 		scr = NULL;
@@ -388,6 +424,52 @@ fail:
 	return 1;
 }
 
+static void drawmain(void)
+{
+	if (dirty & EV_TEXT) {
+		histcalc();
+		unsigned i, j, y;
+		for (i = histip, y = 1; i < HISTSZ; ++i) {
+			j = (histi + histn + i) % HISTSZ;
+			const char *hdr = "  ";
+			if (hist[j][0] && !(hista[j] & HA_OTHER))
+				hdr = "me";
+			mvaddstr(y, 0, hdr);
+			wrapaddstr(y, COL_TXT, COL_TXT, hist[j]);
+			y += histh[j];
+			clrtoeol();
+		}
+		for (; y <= B_TXT; ++y) {
+			move(y, 0);
+			clrtoeol();
+		}
+	}
+}
+
+static void drawsend(void)
+{
+	unsigned i, y;
+	int c_def = p;
+	if (io_select < io_filei)
+		io_filei = io_select;
+	if (io_select > B_TXT)
+		io_filei = io_select - B_TXT + 1;
+	for (i = io_filei, y = 1; i < ls.n && y <= B_TXT; ++y, ++i) {
+		if (i == io_select)
+			color(COL_BLACK, COL_WHITE);
+		else
+			setcol(c_def);
+		wrapaddstr(y, 1, 1, ls.list[i]->d_name);
+		clrtoeol();
+	}
+	setcol(c_def);
+	for (; y <= B_TXT; ++y) {
+		move(y, 0);
+		clrtoeol();
+	}
+}
+
+
 int uimain(void)
 {
 	struct timeval time;
@@ -420,24 +502,10 @@ int uimain(void)
 			clrtoeol();
 			dirty &= ~EV_STATUS;
 		}
-		if (dirty & EV_TEXT) {
-			histcalc();
-			unsigned i, j, y;
-			for (i = histip, y = 1; i < HISTSZ; ++i) {
-				j = (histi + histn + i) % HISTSZ;
-				const char *hdr = "  ";
-				if (hist[j][0] && !(hista[j] & HA_OTHER))
-					hdr = "me";
-				mvaddstr(y, 0, hdr);
-				wrapaddstr(y, COL_TXT, COL_TXT, hist[j]);
-				y += histh[j];
-				clrtoeol();
-			}
-			for (; y <= B_TXT; ++y) {
-				move(y, 0);
-				clrtoeol();
-			}
-		}
+		if (menu == M_MAIN)
+			drawmain();
+		else
+			drawsend();
 		mvaddch(row - 1, col - 2, yay[i]);
 		i ^= 1;
 		clrtoeol();
@@ -468,6 +536,16 @@ unlock:
 static void goto_menu(unsigned m)
 {
 	if (menu == m) return;
+	if (m == M_FILE) {
+		ls_free(&ls);
+		io_filei = 0;
+		if (ls_init(&ls, ".") && ls_init(&ls, "/")) {
+			strperror("map pwd");
+			return;
+		}
+		io_select = ls.n;
+		statusf("items: %zu", ls.n);
+	}
 	menu = m;
 	// XXX consider saving/restoring in own menu specific buffer
 	text[textp = 0] = '\0';
