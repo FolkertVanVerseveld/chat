@@ -9,6 +9,7 @@
 #include <sys/time.h>
 #include <pthread.h>
 #include <ncurses.h>
+#include "string.h"
 #include "net.h"
 
 #define COL_BLACK 0
@@ -53,12 +54,22 @@ static unsigned textp = 0;
 
 static char hist[HISTSZ][N_TEXTSZ];
 static unsigned hista[HISTSZ], histh[HISTSZ];
-static unsigned histn = 0, histi = 0, histy = 1, histyp, histip;
+static unsigned histn = 0, histi = 0, histip;
 // current position is computed as (histi + histn) % HISTSZ
+
+// default behavior causes deadlock when run in UI thread
+#undef nschk
+#define nschk(x) \
+	if (x != NS_OK) {\
+		switch (x) {\
+		case NS_LEFT:strerr("other left");goto fail;\
+		default:errorf("network error: code %u",x);goto fail;\
+		}\
+	}
 
 static void histcalc(void)
 {
-	unsigned sum = 0, i, j, h, c;
+	unsigned sum = 0, i, h, c;
 	for (i = 0; i < HISTSZ; ++i) {
 		h = 1; c = col - COL_TXT;
 		for (const char *str = hist[i]; *str; ++str, --c)
@@ -74,8 +85,7 @@ static void histcalc(void)
 static void histadd(const char *str, unsigned attr)
 {
 	unsigned i = (histi + histn) % HISTSZ;
-	strncpy(hist[i], str, N_TEXTSZ);
-	hist[i][N_TEXTSZ - 1] = '\0';
+	strncpyz(hist[i], str, N_TEXTSZ);
 	hista[i] = attr;
 	if (histn < HISTSZ)
 		++histn;
@@ -84,9 +94,55 @@ static void histadd(const char *str, unsigned attr)
 	dirty |= EV_TEXT;
 }
 
-static void wrapaddstr(unsigned y, unsigned x, unsigned d, char *str)
+/* internal fast ui status update routines */
+static inline void strperror(const char *str)
 {
-	if (d >= col) {
+	snprintf(error, ERRSZ, "%s: %s\n", str, strerror(errno));
+	dirty |= EV_ERROR;
+}
+
+static inline void strstatus(const char *str)
+{
+	strncpyz(status, str, STATSZ);
+	dirty |= EV_STATUS;
+}
+
+static inline void vstatusf(const char *format, va_list args)
+{
+	vsnprintf(status, STATSZ, format, args);
+	dirty |= EV_STATUS;
+}
+
+static inline void statusf(const char *format, ...)
+{
+	va_list args;
+	va_start(args, format);
+	vstatusf(format, args);
+	va_end(args);
+}
+
+static inline void strerr(const char *err)
+{
+	strncpyz(error, err, ERRSZ);
+	dirty |= EV_ERROR;
+}
+
+static inline void verrorf(const char *format, va_list args)
+{
+	vsnprintf(error, ERRSZ, format, args);
+	dirty |= EV_ERROR;
+}
+
+static inline void errorf(const char *format, ...)
+{
+	va_list args;
+	va_start(args, format);
+	verrorf(format, args);
+	va_end(args);
+}
+
+static void wrapaddstr(unsigned y, unsigned x, unsigned d, char *str)
+{ if (d >= col) {
 		sprintf(error, "wrap error: d > col: d=%u,col=%u", d, col);
 		dirty |= EV_ERROR;
 		return;
@@ -126,8 +182,7 @@ void uitext(const char *str)
 void uiperror(const char *str)
 {
 	pthread_mutex_lock(&gevlock);
-	snprintf(error, ERRSZ, "%s: %s\n", str, strerror(errno));
-	dirty |= EV_ERROR;
+	strperror(str);
 	pthread_cond_signal(&gevpush);
 	pthread_mutex_unlock(&gevlock);
 }
@@ -135,9 +190,7 @@ void uiperror(const char *str)
 void uistatus(const char *str)
 {
 	pthread_mutex_lock(&gevlock);
-	strncpy(status, str, STATSZ);
-	status[STATSZ - 1] = '\0';
-	dirty |= EV_STATUS;
+	strstatus(str);
 	pthread_cond_signal(&gevpush);
 	pthread_mutex_unlock(&gevlock);
 }
@@ -147,8 +200,7 @@ void uistatusf(const char *format, ...)
 	va_list args;
 	va_start(args, format);
 	pthread_mutex_lock(&gevlock);
-	vsnprintf(status, STATSZ, format, args);
-	dirty |= EV_STATUS;
+	vstatusf(format, args);
 	pthread_cond_signal(&gevpush);
 	pthread_mutex_unlock(&gevlock);
 	va_end(args);
@@ -157,9 +209,7 @@ void uistatusf(const char *format, ...)
 void uierror(const char *err)
 {
 	pthread_mutex_lock(&gevlock);
-	strncpy(error, err, ERRSZ);
-	error[ERRSZ - 1] = '\0';
-	dirty |= EV_ERROR;
+	strerr(err);
 	pthread_cond_signal(&gevpush);
 	pthread_mutex_unlock(&gevlock);
 }
@@ -169,8 +219,7 @@ void uierrorf(const char *format, ...)
 	va_list args;
 	va_start(args, format);
 	pthread_mutex_lock(&gevlock);
-	vsnprintf(error, ERRSZ, format, args);
-	dirty |= EV_ERROR;
+	verrorf(format, args);
 	pthread_cond_signal(&gevpush);
 	pthread_mutex_unlock(&gevlock);
 	va_end(args);
@@ -227,6 +276,10 @@ static void kbp(int key)
 			t_dirty = 1;
 		}
 	} else if (ch == '\n' || ch == '\r') {
+		if (net_fd == -1) {
+			strerr("client not connected");
+			goto fail;
+		}
 		int ns = nettext(text);
 		nschk(ns);
 		histadd(text, 0);
@@ -304,7 +357,7 @@ int uimain(void)
 {
 	struct timeval time;
 	struct timespec delta;
-	int key, ret, running = 0;
+	int key, running = 0;
 	const char *yay = "+-";
 	int i = 0;
 	if (uiinit())
@@ -318,7 +371,7 @@ int uimain(void)
 			goto unlock;
 		delta.tv_sec = time.tv_sec;
 		delta.tv_nsec = time.tv_usec + 50 * 1000000LU;
-		ret = pthread_cond_timedwait(&gevpush, &gevlock, &delta);
+		pthread_cond_timedwait(&gevpush, &gevlock, &delta);
 		curs_set(0);
 		if (dirty & EV_ERROR) {
 			int col = p;
@@ -357,8 +410,10 @@ int uimain(void)
 		curs_set(1);
 		refresh();
 		while ((key = getch()) != ERR) {
-			if (key == KEY_RESIZE)
+			if (key == KEY_RESIZE) {
 				reshape();
+				continue;
+			}
 			if (key == KEY_F(2)) {
 				running = 0;
 				break;
