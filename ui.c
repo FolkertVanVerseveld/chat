@@ -29,7 +29,8 @@
 static WINDOW *scr = NULL;
 static pthread_mutex_t gevlock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t  gevpush = PTHREAD_COND_INITIALIZER;
-static int row, col, p = 0;
+static int p = 0;
+static unsigned row, col;
 
 #define HA_OTHER 1
 
