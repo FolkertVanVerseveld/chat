@@ -58,6 +58,13 @@ static unsigned hista[HISTSZ], histh[HISTSZ];
 static unsigned histn = 0, histi = 0, histip;
 // current position is computed as (histi + histn) % HISTSZ
 
+#define M_MAIN 0
+#define M_FILE 1
+
+static unsigned menu = M_MAIN;
+
+static void goto_menu(unsigned m);
+
 // default behavior causes deadlock when run in UI thread
 #undef nschk
 #define nschk(x) \
@@ -172,6 +179,11 @@ static void wrapaddstr(unsigned y, unsigned x, unsigned d, char *str)
 		mvaddstr(y, x, old);
 }
 
+/*
+thread-safe ui status updates
+the ui thread is always notified because
+status updates are high-priority events
+*/
 void uitext(const char *str)
 {
 	pthread_mutex_lock(&gevlock);
@@ -246,7 +258,7 @@ static void color(unsigned fg, unsigned bg)
 
 static void uihdr(void)
 {
-	mvaddstr(0, 0, "F2:quit F3:send");
+	mvaddstr(0, 0, menu == M_MAIN ? "F2:quit F3:send" : "F2:quit F3:cancel");
 	refresh();
 }
 
@@ -264,7 +276,38 @@ static void reshape(void)
 	col = x;
 	dirty |= EV_STATUS | EV_TEXT;
 	uihdr();
-	histcalc();
+	if (menu == M_MAIN)
+		histcalc();
+	move(row - 2, textp);
+}
+
+static int kbp_send()
+{
+	if (net_fd == -1) {
+		strerr("client not connected");
+		return 0;
+	}
+	int sp = 0;
+	// don't send only whitespace
+	for (unsigned i = 0; i < textp; ++i)
+		if (!isspace(text[i])) {
+			sp = 1;
+			break;
+		}
+	if (!sp) return 0;
+	int ns = nettext(text);
+	nschk(ns);
+	histadd(text, 0);
+	text[textp = 0] = '\0';
+	return 1;
+fail:
+	return 0;
+}
+
+static int kbp_select()
+{
+	goto_menu(M_MAIN);
+	return 1;
 }
 
 static void kbp(int key)
@@ -276,18 +319,9 @@ static void kbp(int key)
 			text[--textp] = '\0';
 			t_dirty = 1;
 		}
-	} else if (ch == '\n' || ch == '\r') {
-		if (net_fd == -1) {
-			strerr("client not connected");
-			goto fail;
-		}
-		int ns = nettext(text);
-		nschk(ns);
-		histadd(text, 0);
-		text[textp = 0] = '\0';
-	fail:
-		t_dirty = 1;
-	} else if (isprint(ch)) {
+	} else if (ch == '\n' || ch == '\r')
+		t_dirty = menu == M_MAIN ? kbp_send() : kbp_select();
+	else if (isprint(ch)) {
 		if (textp < N_TEXTSZ - 1) {
 			text[textp++] = ch;
 			text[textp] = '\0';
@@ -418,7 +452,9 @@ int uimain(void)
 			if (key == KEY_F(2)) {
 				running = 0;
 				break;
-			} else
+			} else if (key == KEY_F(3))
+				goto_menu(menu == M_MAIN ? M_FILE : M_MAIN);
+			else
 				kbp(key);
 		}
 	}
@@ -427,4 +463,14 @@ unlock:
 		abort();
 	uifree();
 	return 0;
+}
+
+static void goto_menu(unsigned m)
+{
+	if (menu == m) return;
+	menu = m;
+	// XXX consider saving/restoring in own menu specific buffer
+	text[textp = 0] = '\0';
+	dirty = 0;
+	reshape();
 }
