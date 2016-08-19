@@ -23,7 +23,7 @@ static int netehlo(int fd)
 	pkginit(&pkg, NT_EHLO);
 	size_t len = strlen(cfg.pass);
 	memcpy(pkg.data.ehlo.key, cfg.pass, PASSSZ - 1);
-	pkg.data.ehlo.size = len > 255 ? 255 : len;
+	pkg.data.ehlo.size = len > UINT8_MAX ? UINT8_MAX : len;
 	return pkgout(&pkg, fd);
 }
 
@@ -47,7 +47,7 @@ static void *netmain(void *arg)
 			uierror("other left unexpectedly");
 			goto fail;
 		default:
-			uierrorf("network error: code %u", ns);
+			uierrorf("network error or authentication failure: code %u", ns);
 			goto fail;
 		}
 	}

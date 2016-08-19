@@ -27,8 +27,8 @@ extern int net_fd;
 
 struct npkg {
 	uint16_t length;
-	uint8_t prot, type, code;
-	uint8_t res[11]; // currently used for alignment
+	uint8_t prot, type, code, chksum;
+	uint8_t res[10]; // currently used for alignment
 	union {
 		struct {
 			uint8_t size;
@@ -45,6 +45,7 @@ int pkgin(struct npkg *pkg, int fd);
 
 #define NE_TYPE 1
 #define NE_KEY 2
+#define NE_SUM 3
 
 int noclaim(int fd);
 int netcommerr(int fd, struct npkg *pkg, int code);

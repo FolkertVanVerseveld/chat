@@ -26,11 +26,13 @@ static const uint16_t nt_ltbl[NT_MAX + 1] = {
 int pkgout(struct npkg *pkg, int fd)
 {
 	uint16_t length, t_length;
+	uint8_t *ptr = (uint8_t*)pkg;
 	ssize_t n;
 	assert(pkg->type <= NT_MAX);
 	t_length = nt_ltbl[pkg->type];
 	length = t_length + N_HDRSZ;
 	pkg->length = htobe16(length);
+	pkg->chksum = ptr[0] + ptr[1] + ptr[2] + ptr[3] + ptr[4];
 	if (net_salt) {
 		struct npkg crypt;
 		serpent_encblk(&ctx, pkg, &crypt, length);
@@ -86,6 +88,7 @@ copy:
 int pkgin(struct npkg *pkg, int fd)
 {
 	ssize_t n;
+	uint8_t sum, *ptr = (uint8_t*)pkg;
 	uint16_t length, t_length;
 	n = pkgread(fd, pkg, N_HDRSZ);
 	if (!n) return NS_LEFT;
@@ -96,18 +99,24 @@ int pkgin(struct npkg *pkg, int fd)
 		memcpy(pkg, &crypt, N_HDRSZ);
 	}
 	length = be16toh(pkg->length);
+	sum = ptr[0] + ptr[1] + ptr[2] + ptr[3] + ptr[4];
+	if (sum != pkg->chksum) {
+		// XXX consider don't send packet back
+		netcommerr(net_fd, pkg, NE_SUM);
+		return NS_ERR;
+	}
 	if (length < 4 || length > sizeof(struct npkg)) {
-		uierrorf("impossibru: length=%u\n", length);
+		uierrorf("impossibru: length=%u", length);
 		return NS_ERR;
 	}
 	if (pkg->type > NT_MAX) {
-		uierrorf("bad type: type=%u\n", pkg->type);
+		uierrorf("bad type: type=%u", pkg->type);
 		return NS_ERR;
 	}
 	t_length = nt_ltbl[pkg->type];
 	n = pkgread(fd, &pkg->data, t_length);
 	if (n == -1 || n != t_length) {
-		uierrorf("impossibru: n=%zu\n", n);
+		uierrorf("impossibru: n=%zu", n);
 		return NS_ERR;
 	}
 	if (net_salt) {
@@ -145,6 +154,7 @@ int netcommerr(int fd, struct npkg *p, int code)
 	switch (code) {
 	case NE_TYPE: uierrorf("bad pkg type: %hhu", p->type); break;
 	case NE_KEY: uierror("bad authentication"); break;
+	case NE_SUM: uierror("bad packet or authentication"); break;
 	default: uierrorf("network error: code %d", code); break;
 	}
 	memset(&pkg, 0, sizeof pkg);
