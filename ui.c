@@ -56,7 +56,7 @@ static unsigned textp = 0;
 
 static char hist[HISTSZ][N_TEXTSZ];
 static unsigned hista[HISTSZ], histh[HISTSZ];
-static unsigned histn = 0, histi = 0, histip;
+static unsigned histn = 0, histi = 0, histip, histscroll;
 // current position is computed as (histi + histn) % HISTSZ
 
 #define M_MAIN 0
@@ -279,6 +279,8 @@ static void reshape(void)
 	row = y;
 	col = x;
 	dirty |= EV_STATUS | EV_TEXT;
+	// XXX not elegant, but it works
+	histscroll = io_filei = 0;
 	uihdr();
 	if (menu == M_MAIN)
 		histcalc();
@@ -347,6 +349,21 @@ static void kbp(int key)
 {
 	unsigned t_dirty = 0;
 	int ch = key & 0xff;
+	unsigned b_len = menu == M_MAIN ? histn : ls.n;
+	if (B_TXT > b_len) b_len = B_TXT;
+	if (b_len > 0) {
+		if (key == 258) {
+			if (menu == M_MAIN)
+				histscroll = (histscroll + 1) % b_len;
+			else if (ls.n)
+				io_filei = (io_filei + 1) % b_len;
+		} else if (key == 259) {
+			if (menu == M_MAIN)
+				histscroll = (histscroll + b_len - 1) % b_len;
+			else if (ls.n)
+				io_filei = (io_filei + b_len - 1) % b_len;
+		}
+	}
 	if (key == 263 || ch == '\b') {
 		if (textp) {
 			text[--textp] = '\0';
@@ -399,7 +416,7 @@ static int uiinit(void)
 	keypad(scr, TRUE);
 	noecho();
 	nonl();
-	halfdelay(3);
+	halfdelay(1);
 	clear();
 	unsigned fc, bc, p, i;
 	for (bc = 0, i = p = 1, fc = COL_COUNT - 2; i < COL_COUNT; ++i, --fc, ++p)
@@ -429,7 +446,7 @@ static void drawmain(void)
 	if (dirty & EV_TEXT) {
 		histcalc();
 		unsigned i, j, y;
-		for (i = histip, y = 1; i < HISTSZ; ++i) {
+		for (i = histip + histscroll, y = 1; i < HISTSZ; ++i) {
 			j = (histi + histn + i) % HISTSZ;
 			const char *hdr = "  ";
 			if (hist[j][0] && !(hista[j] & HA_OTHER))
@@ -487,7 +504,7 @@ int uimain(void)
 		if (gettimeofday(&time, NULL) != 0)
 			goto unlock;
 		delta.tv_sec = time.tv_sec;
-		delta.tv_nsec = time.tv_usec + 50 * 1000000LU;
+		delta.tv_nsec = time.tv_usec * 1000LU + 100 * 1000000LU;
 		pthread_cond_timedwait(&gevpush, &gevlock, &delta);
 		curs_set(0);
 		if (dirty & EV_ERROR) {
