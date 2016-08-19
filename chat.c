@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -78,6 +79,8 @@ static void usage(int help)
 	help = 1;
 }
 
+static int cfg_read(const char *path);
+
 static int parse_opt(int argc, char **argv)
 {
 	int c, o_i;
@@ -116,7 +119,7 @@ static int parse_opt(int argc, char **argv)
 			break;
 		};
 		case 'a':
-			cfg.address = optarg;
+			strncpyz(cfg.address, optarg, ADDRSZ);
 			break;
 		case 'k': {
 			strncpyz(cfg.pass, optarg, PASSSZ);
@@ -126,11 +129,59 @@ static int parse_opt(int argc, char **argv)
 			break;
 		}
 		case 'f':
-			cfg.fname = optarg;
+			if (cfg_read(cfg.fname = optarg)) {
+				perror(optarg);
+				return -1;
+			}
 			break;
 		}
 	}
 	return o_i;
+}
+
+#define OPT_TOKSZ 32
+#define OPT_VALSZ PASSSZ
+
+static int cfg_read(const char *path)
+{
+	FILE *f = fopen(path, "r");
+	if (!f)
+		return 1;
+	char *line = NULL, *ptr;
+	ssize_t zd;
+	size_t n;
+	int ret = 1;
+	char token[OPT_TOKSZ], value[OPT_VALSZ];
+	while ((zd = getline(&line, &n, f)) >= 0) {
+		if (zd > 0)
+			line[zd - 1] = '\0';
+		ptr = line;
+		while (*ptr && isspace(*ptr))
+			++ptr;
+		if (!*ptr || *ptr == '#')
+			continue;
+		int count;
+		if ((count = sscanf(ptr, "%"stre(OPT_TOKSZ)"s = %"stre(OPT_VALSZ)"s", token, value)) != 2) {
+			fprintf(stderr, "bad line or assignment: %s\n", line);
+			goto fail;
+		}
+		if (!strcmp(token, "key"))
+			strncpyz(cfg.pass, value, OPT_VALSZ);
+		else if (!strcmp(token, "port")) {
+			int port = atoi(value);
+			if (port < 1 || port > 65535) {
+				fprintf(stderr, "%s: bad port, use 1-65535\n", value);
+				goto fail;
+			}
+			cfg.port = port;
+		} else if (!strcmp(token, "address"))
+			strncpyz(cfg.address, value, OPT_VALSZ);
+	}
+	ret = 0;
+fail:
+	if (line) free(line);
+	fclose(f);
+	return ret;
 }
 
 int main(int argc, char **argv)
@@ -138,7 +189,6 @@ int main(int argc, char **argv)
 	int ret;
 	opt_init(argc, argv);
 	ret = parse_opt(argc, argv);
-	// TODO read config file
 	if (ret < 0) return -ret;
 	if (!(cfg.mode & (MODE_SERVER | MODE_CLIENT))) {
 		if (help) return 0;

@@ -5,13 +5,14 @@
 #define BACKLOG 1
 
 #define PASSSZ 256
+#define ADDRSZ 40
 
 #define CFG_FNAME "chat.cfg"
 
 struct cfg {
 	unsigned mode;
 	uint16_t port;
-	const char *address;
+	char address[ADDRSZ];
 	const char *fname;
 	char pass[PASSSZ];
 };
