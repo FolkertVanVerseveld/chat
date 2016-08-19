@@ -9,50 +9,84 @@
 #include "server.h"
 #include "client.h"
 
+#define str(x) #x
+#define stre(e) str(e)
+
 static int help = 0;
 
 struct cfg cfg = {
 	.port = PORT,
 	.address = "127.0.0.1",
+	.fname = CFG_FNAME,
 };
 
-static struct option long_opt[] = {
-	{"help"   , no_argument, 0, 0},
-	{"server" , no_argument, 0, 0},
-	{"client" , no_argument, 0, 0},
-	{"key"    , required_argument, 0, 0},
-	{"port"   , required_argument, 0, 0},
-	{"address", required_argument, 0, 0},
-	{0, 0, 0, 0}
+/*
+use these options to construct parseable options for getopt(3).
+NOTE the first letter has to be unique in order for this to work.
+*/
+struct opt {
+	struct option o;
+	const char *desc;
+} opts[] = {
+	{{"help"   , no_argument, 0, 0}, "this help"},
+	{{"server" , no_argument, 0, 0}, "master mode"},
+	{{"client" , no_argument, 0, 0}, "slave mode"},
+	{{"file"   , required_argument, 0, 0}, "options file location"},
+#ifdef DEBUG
+	{{"key"    , required_argument, 0, 0}, "password (max " stre(PASSSZ) ")"},
+#endif
+	{{"port"   , required_argument, 0, 0}, "transfer endpoint number"},
+	{{"address", required_argument, 0, 0}, "transfer endpoint IP"},
+	{{0, 0, 0, 0}, ""},
 };
 
-static void usage(void)
+#define OPTSZ ((sizeof opts)/(sizeof opts[0]))
+
+static struct option long_opt[OPTSZ];
+static char opt_help[1024];
+static char opt_buf[256];
+
+/* construct parseable options for getopt(3) and create help information */
+static void opt_init(int argc, char **argv)
 {
-	fputs(
+	char *h_ptr = opt_help, *o_ptr = opt_buf;
+	h_ptr += sprintf(h_ptr,
 		"Chat program\n"
-		"usage: chat OPTIONS\n"
+		"usage: %s OPTIONS\n"
 		"available options:\n"
-		"ch long    description\n"
-		" h help    this help\n"
-		" s server  master mode\n"
-		" c client  slave mode\n"
-		" k key     password (max 255)\n"
-		" p port    transfer endpoint number\n"
-		" a address transfer endpoint IP\n",
-		help ? stdout : stderr
+		"ch long    description\n",
+		argc > 0 ? argv[0] : "chat"
 	);
+	for (unsigned i = 0; i < OPTSZ - 1; ++i){
+		struct opt *opt = &opts[i];
+		long_opt[i] = opt->o;
+		h_ptr += sprintf(h_ptr, " %c %7s %s\n", opt->o.name[0], opt->o.name, opt->desc);
+		*o_ptr++ = opt->o.name[0];
+		int has_arg = opt->o.has_arg;
+		if (has_arg == required_argument)
+			*o_ptr++ = ':';
+		else if (has_arg == optional_argument) {
+			*o_ptr++ = ':';
+			*o_ptr++ = ':';
+		}
+	}
+}
+
+static void usage(int help)
+{
+	fputs(opt_help, help ? stdout : stderr);
+	help = 1;
 }
 
 static int parse_opt(int argc, char **argv)
 {
 	int c, o_i;
 	while (1) {
-		c = getopt_long(argc, argv, "hscp:a:k:", long_opt, &o_i);
+		c = getopt_long(argc, argv, opt_buf, long_opt, &o_i);
 		if (c == -1) break;
 		switch (c) {
 		case 'h':
-			help = 1;
-			usage();
+			usage(1);
 			break;
 		case 's':
 			if (cfg.mode & MODE_CLIENT) {
@@ -91,6 +125,9 @@ static int parse_opt(int argc, char **argv)
 			ctx_init(&hash, sizeof hash);
 			break;
 		}
+		case 'f':
+			cfg.fname = optarg;
+			break;
 		}
 	}
 	return o_i;
@@ -98,7 +135,10 @@ static int parse_opt(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
-	int ret = parse_opt(argc, argv);
+	int ret;
+	opt_init(argc, argv);
+	ret = parse_opt(argc, argv);
+	// TODO read config file
 	if (ret < 0) return -ret;
 	if (!(cfg.mode & (MODE_SERVER | MODE_CLIENT))) {
 		if (help) return 0;
