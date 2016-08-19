@@ -65,20 +65,12 @@ static void *netmain(void *arg)
 			}
 		}
 		switch (pkg.type) {
-		case NT_ERR:
-			netperror(pkg.code);
-			close(sock);
-			goto fail;
 		case NT_SALT:
 			netsalt(&pkg);
 			break;
-		case NT_TEXT:
-			uitext(pkg.data.text);
-			break;
 		default:
-			netcommerr(sock, &pkg, NE_TYPE);
-			close(sock);
-			goto fail;
+			if (comm_handle(sock, &pkg))
+				goto fail;
 		}
 	}
 fail:

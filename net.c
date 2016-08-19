@@ -191,3 +191,23 @@ void ctx_init(const void *salt, size_t n)
 	serpent_init(&ctx, salt, n);
 	net_salt = 1;
 }
+
+int comm_handle(int sock, struct npkg *pkg)
+{
+	switch (pkg->type) {
+	case NT_ERR:
+		netperror(pkg->code);
+		close(sock);
+		goto fail;
+	case NT_TEXT:
+		uitext(pkg->data.text);
+		break;
+	default:
+		netcommerr(sock, pkg, NE_TYPE);
+		close(sock);
+		goto fail;
+	}
+	return 0;
+fail:
+	return 1;
+}

@@ -64,21 +64,13 @@ static void *netmain(void *arg)
 			}
 		}
 		switch (pkg.type) {
-		case NT_ERR:
-			netperror(pkg.code);
-			close(client);
-			goto fail;
 		case NT_EHLO:
 			ns = netehlo(client, &pkg);
 			nschk(ns);
 			break;
-		case NT_TEXT:
-			uitext(pkg.data.text);
-			break;
 		default:
-			netcommerr(client, &pkg, NE_TYPE);
-			close(client);
-			goto fail;
+			if (comm_handle(client, &pkg))
+				goto fail;
 		}
 	}
 fail:

@@ -52,6 +52,9 @@ int netcommerr(int fd, struct npkg *pkg, int code);
 void netperror(int code);
 int nettext(const char *text);
 
+/* handle packets that are interpreted the same for master and slave */
+int comm_handle(int fd, struct npkg *pkg);
+
 void ctx_init(const void *salt, size_t n);
 
 #define nschk(x) \
