@@ -2,25 +2,48 @@
 #include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <pthread.h>
+#include "fs.h"
 #include "ui.h"
 #include "serpent.h"
+#include "string.h"
 
 int net_run = 0;
 int net_fd = -1;
 static int net_salt = 0;
 static serpent_ctx ctx;
 
+#define F_ACTIVE 1
+#define F_START 2
+
+struct f_send {
+	uint64_t size;
+	uint8_t state;
+	char name[FNAMESZ];
+};
+
+static struct f_send f_q[IOQSZ];
+static pthread_mutex_t f_lock = PTHREAD_MUTEX_INITIALIZER;
+
+#define LOCK if(pthread_mutex_lock(&f_lock))abort()
+#define UNLOCK if(pthread_mutex_unlock(&f_lock))abort()
+
 static const uint16_t nt_ltbl[NT_MAX + 1] = {
-	[NT_ACK] = 0,
-	[NT_ERR] = 0,
+	[NT_ACK ] = 0,
+	[NT_ERR ] = 0,
+	[NT_NACK] = 0,
+	[NT_DONE] = 0,
 	[NT_EHLO] = PASSSZ,
 	[NT_SALT] = N_SALTSZ,
 	[NT_TEXT] = N_TEXTSZ,
+	[NT_FHDR] = N_FHDRSZ,
+	[NT_FBLK] = N_FBLKSZ,
 };
 
 int pkgout(struct npkg *pkg, int fd)
@@ -133,6 +156,7 @@ int pkgin(struct npkg *pkg, int fd)
 void pkginit(struct npkg *pkg, uint8_t type)
 {
 	assert(type <= NT_MAX);
+	// TODO memset pkg here using computed pkg->length to improve performance
 	pkg->type = type;
 	pkg->prot = 0;
 	pkg->length = htobe16(nt_ltbl[type] + N_HDRSZ);
@@ -192,15 +216,121 @@ void ctx_init(const void *salt, size_t n)
 	net_salt = 1;
 }
 
+static int send_start(struct npkg *p)
+{
+	int ret = 1;
+	if (p->code != NT_FHDR) {
+		netcommerr(net_fd, p, NE_TYPE);
+		return 1;
+	}
+	unsigned slot = p->id;
+	LOCK;
+	if (sq_start(slot))
+		goto fail;
+	f_q[slot].state |= F_START;
+	ret = 0;
+fail:
+	UNLOCK;
+	return ret;
+}
+
+static int send_abort(struct npkg *p)
+{
+	if (p->code != NT_FHDR) {
+		netcommerr(net_fd, p, NE_TYPE);
+		return 1;
+	}
+	unsigned slot = p->id;
+	LOCK;
+	if (!(f_q[slot].state & (F_ACTIVE | F_START))) {
+		netcommerr(net_fd, p, NE_TYPE);
+		UNLOCK;
+		return 1;
+	}
+	f_q[slot].state = 0;
+	UNLOCK;
+	return 0;
+}
+
+static void file_done(uint8_t id)
+{
+	LOCK;
+	// ignore status for now
+	f_q[id].state = 0;
+	UNLOCK;
+}
+
+static int file_data(struct npkg *p)
+{
+	unsigned slot = p->id;
+	struct npkg pkg;
+	int ret = 1;
+	memset(&pkg, 0, sizeof pkg);
+	LOCK;
+	// reject if slot is invalid
+	if (!(f_q[slot].state & (F_ACTIVE | F_START))) {
+		pkginit(&pkg, NT_NACK);
+		pkg.code = NT_FHDR;
+		pkg.id = slot;
+		pkgout(&pkg, net_fd);
+		goto fail;
+	}
+	// grab data and let fs handle it
+	uint64_t offset, size;
+	offset = be64toh(p->data.fblk.offset);
+	size = be64toh(p->data.fblk.size);
+	ret = rq_data(slot, p->data.fblk.blk, offset, size);
+	if (ret)
+		f_q[slot].state = 0;
+fail:
+	UNLOCK;
+	return ret;
+}
+
+static int file_recv(struct npkg *p)
+{
+	struct npkg pkg;
+	const char *name = p->data.fhdr.name;
+	uint64_t size = be64toh(p->data.fhdr.st_size);
+	unsigned slot = p->data.fhdr.id;
+	memset(&pkg, 0, sizeof pkg);
+	pkginit(&pkg, NT_NACK);
+	pkg.code = NT_FHDR;
+	pkg.id = slot;
+	if (rq_put(name, size, slot))
+		goto fail;
+	pkginit(&pkg, NT_ACK);
+	LOCK;
+	struct f_send *f = &f_q[slot];
+	f->size = size;
+	f->state = F_ACTIVE | F_START;
+	strncpyz(f->name, name, FNAMESZ);
+	UNLOCK;
+fail:
+	// acknowledge/reject request to send file
+	return pkgout(&pkg, net_fd);
+}
+
 int comm_handle(int sock, struct npkg *pkg)
 {
 	switch (pkg->type) {
+	case NT_ACK:
+		return send_start(pkg);
+	case NT_NACK:
+		return send_abort(pkg);
 	case NT_ERR:
 		netperror(pkg->code);
 		close(sock);
 		goto fail;
 	case NT_TEXT:
 		uitext(pkg->data.text);
+		break;
+	case NT_FHDR:
+		return file_recv(pkg);
+	case NT_FBLK:
+		return file_data(pkg);
+	case NT_DONE:
+		file_done(pkg->id);
 		break;
 	default:
 		netcommerr(sock, pkg, NE_TYPE);
@@ -210,4 +340,76 @@ int comm_handle(int sock, struct npkg *pkg)
 	return 0;
 fail:
 	return 1;
+}
+
+int net_file_send(const char *name, uint64_t size, uint8_t *slot)
+{
+	struct npkg pkg;
+	int ret = 1;
+	LOCK;
+	unsigned i, low, up;
+	if (cfg.mode & MODE_SERVER) {
+		low = 0;
+		up = IOQSZ / 2;
+	} else {
+		low = IOQSZ / 2;
+		up = IOQSZ;
+	}
+	// naively search empty slot
+	for (i = low; i < up; ++i)
+		if (!(f_q[i].state & F_ACTIVE))
+			break;
+	if (i == up)
+		goto fail;
+	// send request to send file
+	memset(&pkg, 0, sizeof pkg);
+	pkginit(&pkg, NT_FHDR);
+	pkg.data.fhdr.st_size = htobe64(size);
+	pkg.data.fhdr.id = i;
+	strncpyz(pkg.data.fhdr.name, name, FNAMESZ);
+	ret = pkgout(&pkg, net_fd);
+	if (ret) goto fail;
+	// occupy slot
+	struct f_send *f = &f_q[i];
+	f->size = size;
+	f->state |= F_ACTIVE;
+	strncpyz(f->name, name, FNAMESZ);
+	*slot = i;
+	ret = 0;
+fail:
+	UNLOCK;
+	return ret;
+}
+
+int net_file_done(uint8_t id)
+{
+	struct npkg pkg;
+	memset(&pkg, 0, sizeof pkg);
+	pkginit(&pkg, NT_DONE);
+	pkg.id = id;
+	file_done(id);
+	return pkgout(&pkg, net_fd);
+}
+
+int net_file_data(uint8_t id, const void *data, uint64_t offset, unsigned n)
+{
+	struct npkg pkg;
+	assert(n <= FBLKSZ);
+	memset(&pkg, 0, sizeof pkg);
+	pkginit(&pkg, NT_FBLK);
+	pkg.id = id;
+	pkg.data.fblk.offset = htobe64(offset);
+	pkg.data.fblk.size = htobe64(n);
+	memcpy(pkg.data.fblk.blk, data, n);
+	LOCK;
+	struct f_send *f = &f_q[id];
+	if ((f->state & (F_ACTIVE | F_START)) != (F_ACTIVE | F_START)) {
+		UNLOCK;
+		return 1;
+	}
+	int ret = pkgout(&pkg, net_fd);
+	if (ret)
+		f->state &= ~F_START;
+	UNLOCK;
+	return ret;
 }

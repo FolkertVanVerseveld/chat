@@ -1,7 +1,7 @@
 #ifndef CLIENT_H
 #define CLIENT_H
 
-#include "chat.h"
+#include "config.h"
 
 int cmain(void);
 

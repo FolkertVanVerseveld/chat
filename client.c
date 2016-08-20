@@ -5,7 +5,6 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <pthread.h>
-#include "chat.h"
 #include "client.h"
 #include "ui.h"
 #include "net.h"

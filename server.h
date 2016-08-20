@@ -1,7 +1,7 @@
 #ifndef MASTER_H
 #define MASTER_H
 
-#include "chat.h"
+#include "config.h"
 
 int smain(void);
 

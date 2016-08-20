@@ -322,7 +322,9 @@ fail:
 
 static int kbp_select()
 {
-	if (io_select >= ls.n || !strcmp(ls.list[io_select]->d_name, ".")) {
+	if (io_select >= ls.n)
+		strstatus("send aborted");
+	else if (!strcmp(ls.list[io_select]->d_name, ".")) {
 		struct dirent *e = ls.list[io_select];
 		if (d_isdir(e) && !ls_cd(&ls, e->d_name)) {
 			text[textp = 0] = '\0';
@@ -339,7 +341,10 @@ static int kbp_select()
 			strerr("internal error");
 			return 0;
 		}
-		statusf("TODO send \"%s\" from %s", e->d_name, ls.path);
+		if (sq_put(ls.path, e->d_name))
+			strerr("send failed");
+		else
+			statusf("sending \"%s\"", e->d_name);
 	}
 	goto_menu(M_MAIN);
 	return 1;

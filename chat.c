@@ -4,8 +4,9 @@
 #include <string.h>
 #include <unistd.h>
 #include <getopt.h>
-#include "chat.h"
+#include "config.h"
 #include "string.h"
+#include "fs.h"
 #include "net.h"
 #include "server.h"
 #include "client.h"
@@ -200,8 +201,18 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	if (!cfg.pass[0]) {
+	#ifdef DEBUG
 		fputs("need authentication: specify key phrase using -k\n", stderr);
+	#else
+		fputs("need authentication: specify key phrase in config file\n", stderr);
+	#endif
 		return 1;
 	}
-	return cfg.mode & MODE_SERVER ? smain() : cmain();
+	if (fs_init()) {
+		perror("file I/O");
+		return 1;
+	}
+	ret = cfg.mode & MODE_SERVER ? smain() : cmain();
+	fs_free();
+	return ret;
 }

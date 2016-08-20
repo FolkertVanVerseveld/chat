@@ -16,24 +16,39 @@
 #define NT_EHLO 2
 #define NT_SALT 3
 #define NT_TEXT 4
-#define NT_MAX 4
+#define NT_FHDR 5
+#define NT_NACK 6
+#define NT_FBLK 7
+#define NT_DONE 8
+#define NT_MAX 8
 
 #define N_HDRSZ 16
 #define N_SALTSZ 64
 #define N_TEXTSZ 256
+#define N_FHDRSZ 256
+#define N_FBLKSZ (FBLKSZ+16)
 
 extern int net_run; // XXX subject to race conditions if int is nonatomic
 extern int net_fd;
 
 struct npkg {
 	uint16_t length;
-	uint8_t prot, type, code, chksum;
-	uint8_t res[10]; // currently used for alignment
+	uint8_t prot, type, code, chksum, id;
+	uint8_t res[9]; // currently used for alignment
 	union {
 		struct {
 			uint8_t size;
 			char key[PASSSZ - 1]; // *not* \0 terminated!
 		} ehlo;
+		struct {
+			uint64_t st_size;
+			uint8_t id;
+			char name[FNAMESZ]; // *not* \0 terminated!
+		} fhdr;
+		struct {
+			uint64_t offset, size;
+			char blk[FBLKSZ];
+		} fblk;
 		char text[N_TEXTSZ];
 		uint8_t salt[N_SALTSZ];
 	} data;
@@ -51,6 +66,10 @@ int noclaim(int fd);
 int netcommerr(int fd, struct npkg *pkg, int code);
 void netperror(int code);
 int nettext(const char *text);
+
+int net_file_send(const char *name, uint64_t size, uint8_t *slot);
+int net_file_data(uint8_t id, const void *data, uint64_t offset, unsigned n);
+int net_file_done(uint8_t id);
 
 /* handle packets that are interpreted the same for master and slave */
 int comm_handle(int fd, struct npkg *pkg);
