@@ -71,6 +71,16 @@ int net_file_send(const char *name, uint64_t size, uint8_t *slot);
 int net_file_data(uint8_t id, const void *data, uint64_t offset, unsigned n);
 int net_file_done(uint8_t id);
 
+struct net_state {
+	unsigned transfers;
+	unsigned tries;
+	unsigned as_i, ar_i;
+	char send[FNAMESZ];
+	char recv[FNAMESZ];
+};
+
+int net_get_state(struct net_state *state);
+
 /* handle packets that are interpreted the same for master and slave */
 int comm_handle(int fd, struct npkg *pkg);
 

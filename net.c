@@ -28,8 +28,14 @@ struct f_send {
 	char name[FNAMESZ];
 };
 
+static unsigned f_count = 0;
 static struct f_send f_q[IOQSZ];
 static pthread_mutex_t f_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static unsigned ar_i = 256;
+static char ar_name[FNAMESZ];
+static unsigned as_i = 256;
+static char as_name[FNAMESZ];
 
 #define LOCK if(pthread_mutex_lock(&f_lock))abort()
 #define UNLOCK if(pthread_mutex_unlock(&f_lock))abort()
@@ -247,6 +253,7 @@ static int send_abort(struct npkg *p)
 		UNLOCK;
 		return 1;
 	}
+	--f_count;
 	f_q[slot].state = 0;
 	UNLOCK;
 	return 0;
@@ -256,6 +263,11 @@ static void file_done(uint8_t id)
 {
 	LOCK;
 	// ignore status for now
+	--f_count;
+	ar_i = 256;
+	ar_name[0] = '\0';
+	as_i = 256;
+	as_name[0] = '\0';
 	f_q[id].state = 0;
 	UNLOCK;
 }
@@ -282,6 +294,11 @@ static int file_data(struct npkg *p)
 	ret = rq_data(slot, p->data.fblk.blk, offset, size);
 	if (ret)
 		f_q[slot].state = 0;
+	// update state
+	if (slot != ar_i) {
+		ar_i = slot;
+		strncpyz(ar_name, f_q[slot].name, FNAMESZ);
+	}
 fail:
 	UNLOCK;
 	return ret;
@@ -304,6 +321,7 @@ static int file_recv(struct npkg *p)
 	struct f_send *f = &f_q[slot];
 	f->size = size;
 	f->state = F_ACTIVE | F_START;
+	++f_count;
 	strncpyz(f->name, name, FNAMESZ);
 	UNLOCK;
 fail:
@@ -373,8 +391,11 @@ int net_file_send(const char *name, uint64_t size, uint8_t *slot)
 	struct f_send *f = &f_q[i];
 	f->size = size;
 	f->state |= F_ACTIVE;
+	++f_count;
 	strncpyz(f->name, name, FNAMESZ);
 	*slot = i;
+	as_i = i;
+	strncpyz(as_name, name, FNAMESZ);
 	ret = 0;
 fail:
 	UNLOCK;
@@ -412,4 +433,34 @@ int net_file_data(uint8_t id, const void *data, uint64_t offset, unsigned n)
 		f->state &= ~F_START;
 	UNLOCK;
 	return ret;
+}
+
+int net_get_state(struct net_state *state)
+{
+	unsigned n = state->transfers;
+#ifdef LAZY_STATUS
+	if (pthread_mutex_trylock(&f_lock)) {
+		if (++state->tries == 10) {
+			state->tries = 0;
+			// force acquire lock
+			LOCK;
+		} else
+			return 0;
+	}
+#else
+	LOCK;
+#endif
+	state->transfers = f_count;
+	if (ar_i < 256)
+		strncpyz(state->recv, ar_name, FNAMESZ);
+	else
+		state->recv[0] = '\0';
+	if (as_i < 256)
+		strncpyz(state->send, as_name, FNAMESZ);
+	else
+		state->send[0] = '\0';
+	state->ar_i = ar_i;
+	state->as_i = as_i;
+	UNLOCK;
+	return n != state->transfers;
 }

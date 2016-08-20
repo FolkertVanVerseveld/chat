@@ -505,6 +505,10 @@ int uimain(void)
 	if (pthread_mutex_lock(&gevlock) != 0)
 		abort();
 	uihdr();
+	struct net_state state;
+	state.transfers = 1;
+	state.tries = 0;
+	state.send[0] = state.recv[0] = '\0';
 	while (running) {
 		if (gettimeofday(&time, NULL) != 0)
 			goto unlock;
@@ -528,6 +532,27 @@ int uimain(void)
 			drawmain();
 		else
 			drawsend();
+		char buf[256];
+		unsigned x = 20;
+		if (net_get_state(&state)) {
+			char *ptr = buf;
+			unsigned i, n = sizeof buf;
+			if (n > col - x) n = col - x;
+			i = snprintf(ptr, n, "transfers: %u", state.transfers);
+			n -= i; ptr += i;
+			if (state.recv[0]) {
+				i = snprintf(ptr, n, ", recv: %s", state.recv);
+				n -= i;
+				ptr += i;
+			}
+			if (state.send[0]) {
+				i = snprintf(ptr, n, ", send: %s", state.send);
+				n -= i;
+				ptr += i;
+			}
+			mvaddstr(0, x, buf);
+		}
+		clrtoeol();
 		mvaddch(row - 1, col - 2, yay[i]);
 		i ^= 1;
 		clrtoeol();

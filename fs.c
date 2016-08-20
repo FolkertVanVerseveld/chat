@@ -232,6 +232,9 @@ static void *sendmain(void *arg)
 	while (s_run) {
 		struct f_item f;
 		LOCK;
+		// XXX consider no timedwait and either:
+		// * use goto magic to search active slot
+		// * write while no active slot loop
 		if (gettimeofday(&time, NULL) != 0) {
 			UNLOCK;
 			goto fail;
