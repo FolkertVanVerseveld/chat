@@ -534,24 +534,38 @@ int uimain(void)
 			drawsend();
 		char buf[256];
 		unsigned x = 20;
+#ifndef LAZY_UPDATE
+		net_get_state(&state);
+#else
 		if (net_get_state(&state)) {
+#endif
 			char *ptr = buf;
+			char pdone[80], ptot[80];
+			float perc;
 			unsigned i, n = sizeof buf;
 			if (n > col - x) n = col - x;
 			i = snprintf(ptr, n, "transfers: %u", state.transfers);
 			n -= i; ptr += i;
 			if (state.recv[0]) {
-				i = snprintf(ptr, n, ", recv: %s", state.recv);
+				strtosi(pdone, sizeof pdone, state.ar_off, 3);
+				strtosi(ptot, sizeof ptot, state.ar_size, 3);
+				perc = state.ar_size ? state.ar_off * 100.0f / state.ar_size : 100.0f;
+				i = snprintf(ptr, n, ", recv: %s %s/%s (%.2f%%)", state.recv, pdone, ptot, perc);
 				n -= i;
 				ptr += i;
 			}
 			if (state.send[0]) {
-				i = snprintf(ptr, n, ", send: %s", state.send);
+				strtosi(pdone, sizeof pdone, state.as_off, 3);
+				strtosi(ptot, sizeof ptot, state.as_size, 3);
+				perc = state.as_size ? state.as_off * 100.0f / state.as_size : 100.0f;
+				i = snprintf(ptr, n, ", send: %s %s/%s (%.2f%%)", state.send, pdone, ptot, perc);
 				n -= i;
 				ptr += i;
 			}
 			mvaddstr(0, x, buf);
+#ifdef LAZY_UPDATE
 		}
+#endif
 		clrtoeol();
 		mvaddch(row - 1, col - 2, yay[i]);
 		i ^= 1;

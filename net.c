@@ -34,8 +34,12 @@ static pthread_mutex_t f_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static unsigned ar_i = 256;
 static char ar_name[FNAMESZ];
+static uint64_t ar_size = 0;
+static uint64_t ar_off = 0;
 static unsigned as_i = 256;
 static char as_name[FNAMESZ];
+static uint64_t as_size = 0;
+static uint64_t as_off = 0;
 
 #define LOCK if(pthread_mutex_lock(&f_lock))abort()
 #define UNLOCK if(pthread_mutex_unlock(&f_lock))abort()
@@ -295,10 +299,10 @@ static int file_data(struct npkg *p)
 	if (ret)
 		f_q[slot].state = 0;
 	// update state
-	if (slot != ar_i) {
-		ar_i = slot;
+	if (slot != ar_i)
 		strncpyz(ar_name, f_q[slot].name, FNAMESZ);
-	}
+	ar_i = slot;
+	ar_off = offset;
 fail:
 	UNLOCK;
 	return ret;
@@ -323,6 +327,8 @@ static int file_recv(struct npkg *p)
 	f->state = F_ACTIVE | F_START;
 	++f_count;
 	strncpyz(f->name, name, FNAMESZ);
+	ar_size = size;
+	ar_off = 0;
 	UNLOCK;
 fail:
 	// acknowledge/reject request to send file
@@ -395,6 +401,8 @@ int net_file_send(const char *name, uint64_t size, uint8_t *slot)
 	strncpyz(f->name, name, FNAMESZ);
 	*slot = i;
 	as_i = i;
+	as_size = size;
+	as_off = 0;
 	strncpyz(as_name, name, FNAMESZ);
 	ret = 0;
 fail:
@@ -412,7 +420,7 @@ int net_file_done(uint8_t id)
 	return pkgout(&pkg, net_fd);
 }
 
-int net_file_data(uint8_t id, const void *data, uint64_t offset, unsigned n)
+int net_file_data(uint8_t id, const void *data, uint64_t offset, unsigned n, uint64_t size)
 {
 	struct npkg pkg;
 	assert(n <= FBLKSZ);
@@ -431,6 +439,8 @@ int net_file_data(uint8_t id, const void *data, uint64_t offset, unsigned n)
 	int ret = pkgout(&pkg, net_fd);
 	if (ret)
 		f->state &= ~F_START;
+	as_size = size;
+	as_off = offset;
 	UNLOCK;
 	return ret;
 }
@@ -461,6 +471,10 @@ int net_get_state(struct net_state *state)
 		state->send[0] = '\0';
 	state->ar_i = ar_i;
 	state->as_i = as_i;
+	state->ar_size = ar_size;
+	state->as_size = as_size;
+	state->ar_off = ar_off;
+	state->as_off = as_off;
 	UNLOCK;
 	return n != state->transfers;
 }

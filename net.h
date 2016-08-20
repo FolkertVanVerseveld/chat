@@ -68,13 +68,15 @@ void netperror(int code);
 int nettext(const char *text);
 
 int net_file_send(const char *name, uint64_t size, uint8_t *slot);
-int net_file_data(uint8_t id, const void *data, uint64_t offset, unsigned n);
+int net_file_data(uint8_t id, const void *data, uint64_t offset, unsigned n, uint64_t size);
 int net_file_done(uint8_t id);
 
 struct net_state {
 	unsigned transfers;
 	unsigned tries;
 	unsigned as_i, ar_i;
+	uint64_t as_size, ar_size;
+	uint64_t as_off, ar_off;
 	char send[FNAMESZ];
 	char recv[FNAMESZ];
 };

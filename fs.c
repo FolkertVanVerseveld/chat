@@ -267,8 +267,9 @@ static void *sendmain(void *arg)
 		while (f.offset != f.size) {
 			diff = f.size - f.offset;
 			if (diff > FBLKSZ) diff = FBLKSZ;
+			// FIXME segfault if symlink is send as file
 			memcpy(blk, f.map + f.offset, diff);
-			if (net_file_data(i, blk, f.offset, diff)) {
+			if (net_file_data(i, blk, f.offset, diff, f.size)) {
 			abort:
 				// abort file transfer
 				aborted = 1;
