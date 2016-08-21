@@ -24,5 +24,6 @@ int sq_start(uint8_t id);
 // Receive Queue put
 int rq_put(const char *name, uint64_t size, uint8_t id);
 int rq_data(uint8_t id, const void *data, uint64_t offset, unsigned n);
+void log_txt(const char *txt);
 
 #endif

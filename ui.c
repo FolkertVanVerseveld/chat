@@ -105,6 +105,19 @@ static void histadd(const char *str, unsigned attr)
 	else
 		histi = (histi + 1) % HISTSZ;
 	dirty |= EV_TEXT;
+	char log[256 + N_TEXTSZ], *ptr = log;
+	struct tm t_now;
+	localtime_r(&histt[i], &t_now);
+	ptr += strftime(log, sizeof log, "%F %H:%M:%S", &t_now);
+	if (hista[i] & HA_OTHER)
+		strcpy(ptr, "    ");
+	else
+		strcpy(ptr, " me ");
+	ptr += 4;
+	strcpy(ptr, str);
+	ptr += strlen(str);
+	*ptr = '\0';
+	log_txt(log);
 }
 
 /* internal fast ui status update routines */

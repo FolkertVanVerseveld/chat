@@ -15,6 +15,8 @@
 #define F_ACTIVE 1
 #define F_START 2
 
+static FILE *f_log = NULL;
+
 struct f_item {
 	uint64_t size;
 	uint64_t offset;
@@ -319,6 +321,17 @@ fail:
 
 int fs_init(void)
 {
+	char logpath[256];
+	time_t t_now;
+	struct tm tm_now;
+	time(&t_now);
+	localtime_r(&t_now, &tm_now);
+	strftime(logpath, sizeof logpath, "%F_%H_%M_%S", &tm_now);
+	f_log = fopen(logpath, "w");
+	if (!f_log) {
+		perror(logpath);
+		return 1;
+	}
 	for (unsigned i = 0; i < IOQSZ; ++i) {
 		f_q[i].fd = -1;
 		f_q[i].map = MAP_FAILED;
@@ -342,5 +355,15 @@ void fs_free(void)
 		}
 		f->state = 0;
 	}
+	if (f_log) {
+		fclose(f_log);
+		f_log = NULL;
+	}
 	UNLOCK;
+}
+
+void log_txt(const char *txt)
+{
+	if (!f_log) return;
+	fprintf(f_log, "%s\n", txt);
 }
