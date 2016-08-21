@@ -311,9 +311,13 @@ fail:
 static int file_recv(struct npkg *p)
 {
 	struct npkg pkg;
+	int ret;
+	char msg[256];
 	const char *name = p->data.fhdr.name;
 	uint64_t size = be64toh(p->data.fhdr.st_size);
-	unsigned slot = p->data.fhdr.id;
+	unsigned type, slot = p->data.fhdr.id;
+	snprintf(msg, sizeof msg, "incoming file: %s (%zu bytes)", name, (size_t)size);
+	uitext(msg);
 	memset(&pkg, 0, sizeof pkg);
 	pkginit(&pkg, NT_NACK);
 	pkg.code = NT_FHDR;
@@ -332,7 +336,17 @@ static int file_recv(struct npkg *p)
 	UNLOCK;
 fail:
 	// acknowledge/reject request to send file
-	return pkgout(&pkg, net_fd);
+	type = pkg.type;
+	ret = pkgout(&pkg, net_fd);
+	if (!ret) {
+		if (type == NT_ACK)
+			snprintf(msg, sizeof msg, "receiving %s...", name);
+		else
+			snprintf(msg, sizeof msg, "rejected %s", name);
+		uitext(msg);
+	} else
+		uierror("file transfer failed");
+	return ret;
 }
 
 int comm_handle(int sock, struct npkg *pkg)

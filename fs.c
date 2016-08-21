@@ -181,7 +181,7 @@ fail:
 	return ret;
 }
 
-int sq_put(const char *path, const char *name)
+int sq_put(const char *path, const char *name, uint64_t *size)
 {
 	char *fname, *map = MAP_FAILED;
 	size_t p_len, n_len, f_len;
@@ -210,6 +210,7 @@ int sq_put(const char *path, const char *name)
 	f->map = map;
 	f->state = F_ACTIVE;
 	UNLOCK;
+	*size = st.st_size;
 fail:
 	if (fname) free(fname);
 	if (ret) {

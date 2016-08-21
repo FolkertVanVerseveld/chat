@@ -19,7 +19,7 @@ int ls_cd(struct ls *this, const char *path);
 int d_isdir(struct dirent *d);
 void ls_free(struct ls *this);
 // Send Queue put
-int sq_put(const char *path, const char *name);
+int sq_put(const char *path, const char *name, uint64_t *size);
 int sq_start(uint8_t id);
 // Receive Queue put
 int rq_put(const char *name, uint64_t size, uint8_t id);

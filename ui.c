@@ -48,13 +48,14 @@ static char status[STATSZ], error[ERRSZ];
 static char text[N_TEXTSZ];
 static unsigned textp = 0;
 
-#define COL_TXT 3
+#define COL_TXT 24
 
 #define B_ROW(y) (row-(y))
 #define B_TXT B_ROW(3)
 
 static char hist[HISTSZ][N_TEXTSZ];
 static unsigned hista[HISTSZ], histh[HISTSZ];
+static time_t histt[HISTSZ];
 static unsigned histn = 0, histi = 0, histip, histscroll;
 // current position is computed as (histi + histn) % HISTSZ
 
@@ -98,6 +99,7 @@ static void histadd(const char *str, unsigned attr)
 	unsigned i = (histi + histn) % HISTSZ;
 	strncpyz(hist[i], str, N_TEXTSZ);
 	hista[i] = attr;
+	time(&histt[i]);
 	if (histn < HISTSZ)
 		++histn;
 	else
@@ -340,10 +342,15 @@ static int kbp_select()
 			strerr("internal error");
 			return 0;
 		}
-		if (sq_put(ls.path, e->d_name))
+		uint64_t size;
+		if (sq_put(ls.path, e->d_name, &size))
 			strerr("send failed");
-		else
+		else {
+			char msg[256];
+			snprintf(msg, sizeof msg, "sending file: %s (%zu bytes)", e->d_name, (size_t)size);
+			histadd(msg, 0);
 			statusf("sending \"%s\"", e->d_name);
+		}
 	}
 	goto_menu(M_MAIN);
 	return 1;
@@ -453,10 +460,22 @@ static void drawmain(void)
 		unsigned i, j, y;
 		for (i = histip + histscroll, y = 1; i < HISTSZ; ++i) {
 			j = (histi + histn + i) % HISTSZ;
-			const char *hdr = "  ";
-			if (hist[j][0] && !(hista[j] & HA_OTHER))
-				hdr = "me";
+			char hdr[COL_TXT];
+			hdr[0] = '\0';
+			if (hist[j][0]) {
+				struct tm t;
+				localtime_r(&histt[j], &t);
+				unsigned i = strftime(hdr, sizeof hdr, "%F %H:%M:%S", &t);
+				if (!(hista[j] & HA_OTHER)) {
+					while (i < COL_TXT - 3)
+						hdr[i++] = ' ';
+					hdr[COL_TXT - 3] = 'm';
+					hdr[COL_TXT - 2] = 'e';
+				}
+			}
+			hdr[COL_TXT - 1] = '\0';
 			mvaddstr(y, 0, hdr);
+			clrtoeol();
 			wrapaddstr(y, COL_TXT, COL_TXT, hist[j]);
 			y += histh[j];
 			clrtoeol();
