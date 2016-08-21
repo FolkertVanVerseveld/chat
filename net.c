@@ -417,6 +417,7 @@ int net_file_done(uint8_t id)
 	pkginit(&pkg, NT_DONE);
 	pkg.id = id;
 	file_done(id);
+	uistatus("transfer completed");
 	return pkgout(&pkg, net_fd);
 }
 

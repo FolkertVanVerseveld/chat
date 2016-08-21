@@ -1,4 +1,5 @@
 #include "string.h"
+#include <stdio.h>
 
 char *strncpyz(char *dest, const char *src, size_t n)
 {
@@ -47,4 +48,32 @@ unsigned long strhash(const char *str)
 	while (c = *str++)
 		hash = (hash << 5) + hash + c;
 	return hash;
+}
+
+void streta(char *str, size_t n, struct timespec start, struct timespec now, long diff)
+{
+	struct timespec tmp;
+	char sbuf[32];
+	// XXX potential overflow in struct timespec
+	if (start.tv_sec > now.tv_sec) {
+		tmp = start;
+		start = now;
+		now = tmp;
+	}
+	time_t dt_sec;
+	long dt_msec;
+	if (now.tv_nsec > start.tv_nsec) {
+		dt_sec = now.tv_sec - start.tv_sec;
+		dt_msec = (now.tv_nsec - start.tv_nsec) / 1000000L;
+	} else {
+		dt_sec = now.tv_sec - start.tv_sec - 1;
+		dt_msec = (1000000000L + now.tv_nsec - start.tv_nsec) / 1000000L;
+	}
+	long dt = dt_sec * 1000 + dt_msec;
+	float p_speed = dt ? diff * 1000.0f / dt : diff;
+	strtosi(sbuf, sizeof sbuf, p_speed, 3);
+	if (dt)
+		snprintf(str, n, "@%s/s", sbuf);
+	else
+		snprintf(str, n, "@???");
 }

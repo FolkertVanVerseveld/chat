@@ -6,7 +6,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <sys/time.h>
 #include <pthread.h>
 #include <ncurses.h>
 #include "fs.h"
@@ -381,7 +380,8 @@ static void kbp(int key)
 			text[textp++] = ch;
 			text[textp] = '\0';
 			t_dirty = 1;
-		}
+		} else if (menu == M_MAIN)
+			t_dirty = kbp_send();
 	}
 	if (t_dirty) {
 		if (menu == M_FILE)
@@ -505,10 +505,13 @@ int uimain(void)
 	if (pthread_mutex_lock(&gevlock) != 0)
 		abort();
 	uihdr();
-	struct net_state state;
+	struct net_state old_state, state;
 	state.transfers = 1;
 	state.tries = 0;
 	state.send[0] = state.recv[0] = '\0';
+	unsigned n = state.transfers;
+	struct timespec old, now;
+	clock_gettime(CLOCK_MONOTONIC, &old);
 	while (running) {
 		if (gettimeofday(&time, NULL) != 0)
 			goto unlock;
@@ -534,13 +537,17 @@ int uimain(void)
 			drawsend();
 		char buf[256];
 		unsigned x = 20;
+		now = old;
 #ifndef LAZY_UPDATE
 		net_get_state(&state);
 #else
 		if (net_get_state(&state)) {
 #endif
+			long diff = 0;
+			if (n == state.transfers)
+				clock_gettime(CLOCK_MONOTONIC, &now);
 			char *ptr = buf;
-			char pdone[80], ptot[80];
+			char pdone[80], ptot[80], speed[40];
 			float perc;
 			unsigned i, n = sizeof buf;
 			if (n > col - x) n = col - x;
@@ -550,7 +557,9 @@ int uimain(void)
 				strtosi(pdone, sizeof pdone, state.ar_off, 3);
 				strtosi(ptot, sizeof ptot, state.ar_size, 3);
 				perc = state.ar_size ? state.ar_off * 100.0f / state.ar_size : 100.0f;
-				i = snprintf(ptr, n, ", recv: %s %s/%s (%.2f%%)", state.recv, pdone, ptot, perc);
+				diff = state.ar_off - old_state.ar_off;
+				streta(speed, sizeof speed, old, now, diff);
+				i = snprintf(ptr, n, ", recv: %s %s/%s (%.2f%%) %s", state.recv, pdone, ptot, perc, speed);
 				n -= i;
 				ptr += i;
 			}
@@ -558,7 +567,9 @@ int uimain(void)
 				strtosi(pdone, sizeof pdone, state.as_off, 3);
 				strtosi(ptot, sizeof ptot, state.as_size, 3);
 				perc = state.as_size ? state.as_off * 100.0f / state.as_size : 100.0f;
-				i = snprintf(ptr, n, ", send: %s %s/%s (%.2f%%)", state.send, pdone, ptot, perc);
+				diff = state.as_off - old_state.as_off;
+				streta(speed, sizeof speed, old, now, diff);
+				i = snprintf(ptr, n, ", send: %s %s/%s (%.2f%%) %s", state.send, pdone, ptot, perc, speed);
 				n -= i;
 				ptr += i;
 			}
@@ -566,6 +577,9 @@ int uimain(void)
 #ifdef LAZY_UPDATE
 		}
 #endif
+		n = state.transfers;
+		old = now;
+		old_state = state;
 		clrtoeol();
 		mvaddch(row - 1, col - 2, yay[i]);
 		i ^= 1;
