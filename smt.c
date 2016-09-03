@@ -2,12 +2,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "font_rgb.h"
+#include "view.h"
 
 #define GLYPH_WIDTH 9
 #define GLYPH_HEIGHT 16
 
-#define WIDTH (GLYPH_WIDTH * 80)
-#define HEIGHT (GLYPH_HEIGHT * 24)
+#define WIDTH (GLYPH_WIDTH * COL_MIN)
+#define HEIGHT (GLYPH_HEIGHT * 2 * ROW_MIN)
 #define TITLE "chat"
 
 static unsigned win = SMT_RES_INVALID;
