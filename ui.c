@@ -11,6 +11,7 @@
 #include "fs.h"
 #include "string.h"
 #include "net.h"
+#include "smt.h"
 
 #define COL_BLACK 0
 #define COL_RED 1
@@ -530,7 +531,10 @@ int uimain(void)
 	struct timespec delta;
 	int key, running = 0;
 	const char *yay = "+-";
-	int i = 0;
+	if (cfg.mode & MODE_GUI) {
+		if (smtinit())
+			return 1;
+	}
 	if (uiinit())
 		return 1;
 	running = 1;

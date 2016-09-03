@@ -1,8 +1,16 @@
 #!/bin/bash -e
 # Simple script that creates a Makefile for all c files that contain a main function
 CC=gcc
+if [ -z $INCPATH ]; then
+	echo "INCPATH: not defined" 1>&2
+	exit 1
+fi
+if [ -z $SMTPATH ]; then
+	echo "SMTPATH: not defined" 1>&2
+	exit 1
+fi
 cstd='-std=gnu99'
-CFLAGS="-D_LARGEFILE64_SOURCE -Wall -Wextra -pedantic -pthread $cstd $*"
+CFLAGS="-D_LARGEFILE64_SOURCE -Wall -Wextra -pedantic -pthread $cstd -I$INCPATH $*"
 INCS=
 cat <<END >.gitignore
 # Created by build script. Modifications are lost when rerun.
@@ -16,13 +24,13 @@ Makefile
 *.o
 END
 CFLAGS="$CFLAGS $INCS"
-libs='ncurses openal'
+libs='ncurses sdl2 glew freealut vorbisfile'
 if ! hash pkg-config 2>/dev/null; then
 	echo "pkg-config is missing" 1>&2
 	exit 1
 fi
 CFLAGS="$CFLAGS $(pkg-config --cflags $libs)"
-LDLIBS="$(pkg-config --libs $libs) -lpthread"
+LDLIBS="$(pkg-config --libs $libs) -lSDL2_image -lpthread -lm"
 # Write phony target and overwrite some builtin variables
 cat <<END >Makefile
 .PHONY: default clean
@@ -61,7 +69,7 @@ cat <<'EOF' >>Makefile
 default: $(OBJECTS) $(MAIN)
 EOF
 for i in $MAIN; do
-	printf '%s: %s $(LIST)\n' "${i/%.c/}" "${i/%.c/.o}" >>Makefile
+	printf '%s: %s $(LIST) '$SMTPATH'\n' "${i/%.c/}" "${i/%.c/.o}" >>Makefile
 done
 cat <<'EOF' >>Makefile
 %.o: %.c

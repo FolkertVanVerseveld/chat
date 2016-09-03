@@ -39,6 +39,8 @@ struct opt {
 #endif
 	{{"port"   , required_argument, 0, 0}, "transfer endpoint number"},
 	{{"address", required_argument, 0, 0}, "transfer endpoint IP"},
+	{{"gui", no_argument, 0, 0}, "force GUI"},
+	{{"quiet", no_argument, 0, 0}, "do not create log file"},
 	{{0, 0, 0, 0}, ""},
 };
 
@@ -134,6 +136,12 @@ static int parse_opt(int argc, char **argv)
 				perror(optarg);
 				return -1;
 			}
+			break;
+		case 'g':
+			cfg.mode |= MODE_GUI;
+			break;
+		case 'q':
+			cfg.mode |= MODE_QUIET;
 			break;
 		}
 	}

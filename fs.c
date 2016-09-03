@@ -150,6 +150,7 @@ resize:
 	if (map == MAP_FAILED)
 		goto fail;
 	if (alt) free(alt);
+	alt = NULL;
 	// occupy slot
 	LOCK;
 	struct f_item *f = &f_q[slot];
@@ -327,10 +328,12 @@ int fs_init(void)
 	time(&t_now);
 	localtime_r(&t_now, &tm_now);
 	strftime(logpath, sizeof logpath, "%F_%H_%M_%S", &tm_now);
-	f_log = fopen(logpath, "w");
-	if (!f_log) {
-		perror(logpath);
-		return 1;
+	if (!(cfg.mode & MODE_QUIET)) {
+		f_log = fopen(logpath, "w");
+		if (!f_log) {
+			perror(logpath);
+			return 1;
+		}
 	}
 	for (unsigned i = 0; i < IOQSZ; ++i) {
 		f_q[i].fd = -1;

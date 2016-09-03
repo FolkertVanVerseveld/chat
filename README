@@ -1,0 +1,3 @@
+quick and dirty ncurses chat
+
+all code (except serpent.c and serpent.h) are Apache 2.0 licensed.

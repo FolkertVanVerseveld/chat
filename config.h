@@ -5,6 +5,8 @@
 
 #define MODE_SERVER 1
 #define MODE_CLIENT 2
+#define MODE_GUI 4
+#define MODE_QUIET 8
 
 #define PORT 25659
 #define BACKLOG 1
