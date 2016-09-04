@@ -14,8 +14,6 @@
 #include "text.h"
 #include "view.h"
 
-static void goto_menu(unsigned m);
-
 // default behavior causes deadlock when run in UI thread
 #undef nschk
 #define nschk(x) \
@@ -26,7 +24,7 @@ static void goto_menu(unsigned m);
 		}\
 	}
 
-static void histcalc(void)
+void histcalc(void)
 {
 	unsigned sum = 0, i, h, c;
 	for (i = 0; i < HISTSZ; ++i) {
@@ -114,7 +112,7 @@ static inline void errorf(const char *format, ...)
 	va_end(args);
 }
 
-static void wrapaddstr(unsigned y, unsigned x, unsigned d, char *str)
+void wrapaddstr(unsigned y, unsigned x, unsigned d, char *str)
 {
 	if (d >= col) {
 		sprintf(error, "wrap error: d > col: d=%u,col=%u", d, col);
@@ -204,28 +202,13 @@ void uierrorf(const char *format, ...)
 	va_end(args);
 }
 
-static void setcol(int col)
-{
-	if (p != col) {
-		attroff(COLOR_PAIR(p));
-		attron(COLOR_PAIR(col));
-		p = col;
-	}
-}
-
-static void color(unsigned fg, unsigned bg)
+void color(unsigned fg, unsigned bg)
 {
 	int col = bg * COL_COUNT + COL_COUNT - fg - 1;
 	if (col < 0) col = 0;
 	if (col >= COL_MAX)
 		col = COL_MAX;
 	setcol(col);
-}
-
-static void uihdr(void)
-{
-	mvaddstr(0, 0, menu == M_MAIN ? "F2:quit F3:send" : "F2:quit F3:cancel");
-	refresh();
 }
 
 static void uigetdim(int *y, int *x)
@@ -249,7 +232,7 @@ void reshape(void)
 	dirty |= EV_STATUS | EV_TEXT;
 	// XXX not elegant, but it works
 	histscroll = io_filei = 0;
-	uihdr();
+	drawhdr();
 	if (menu == M_MAIN)
 		histcalc();
 	move(row - 2, textp);
@@ -323,7 +306,7 @@ static int kbp_select()
 	return 1;
 }
 
-static void kbp(int key)
+void kbp(int key)
 {
 	unsigned t_dirty = 0;
 	int ch = key & 0xff;
@@ -376,180 +359,15 @@ static int uiinit(void)
 	return (cfg.mode & MODE_GUI) ? smtinit() : txtinit();
 }
 
-static void drawmain(void)
-{
-	if (dirty & EV_TEXT) {
-		histcalc();
-		unsigned i, j, y;
-		for (i = histip + histscroll, y = 1; i < HISTSZ; ++i) {
-			j = (histi + histn + i) % HISTSZ;
-			char hdr[COL_TXT];
-			hdr[0] = '\0';
-			if (hist[j][0]) {
-				struct tm t;
-				localtime_r(&histt[j], &t);
-				unsigned i = strftime(hdr, sizeof hdr, "%F %H:%M:%S", &t);
-				if (!(hista[j] & HA_OTHER)) {
-					while (i < COL_TXT - 3)
-						hdr[i++] = ' ';
-					hdr[COL_TXT - 3] = 'm';
-					hdr[COL_TXT - 2] = 'e';
-				}
-			}
-			hdr[COL_TXT - 1] = '\0';
-			mvaddstr(y, 0, hdr);
-			clrtoeol();
-			wrapaddstr(y, COL_TXT, COL_TXT, hist[j]);
-			y += histh[j];
-			clrtoeol();
-		}
-		for (; y <= B_TXT; ++y) {
-			move(y, 0);
-			clrtoeol();
-		}
-	}
-}
-
-static void drawsend(void)
-{
-	unsigned i, y;
-	int c_def = p;
-	if (io_select < io_filei)
-		io_filei = io_select;
-	if (io_select > B_TXT)
-		io_filei = io_select - B_TXT + 1;
-	for (i = io_filei, y = 1; i < ls.n && y <= B_TXT; ++y, ++i) {
-		if (i == io_select)
-			color(COL_BLACK, COL_WHITE);
-		else
-			setcol(c_def);
-		wrapaddstr(y, 1, 1, ls.list[i]->d_name);
-		clrtoeol();
-	}
-	setcol(c_def);
-	for (; y <= B_TXT; ++y) {
-		move(y, 0);
-		clrtoeol();
-	}
-}
-
-
 int uimain(void)
 {
-	struct timeval time;
-	struct timespec delta;
-	int key, running = 0;
-	const char *yay = "+-";
 	if (uiinit())
 		return 1;
-	running = 1;
-	if (pthread_mutex_lock(&gevlock) != 0)
-		abort();
-	uihdr();
-	struct net_state old_state, state;
-	state.transfers = 1;
-	state.tries = 0;
-	state.send[0] = state.recv[0] = '\0';
-	unsigned n = state.transfers;
-	struct timespec old, now;
-	clock_gettime(CLOCK_MONOTONIC, &old);
-	while (running) {
-		if (gettimeofday(&time, NULL) != 0)
-			goto unlock;
-		delta.tv_sec = time.tv_sec;
-		delta.tv_nsec = time.tv_usec * 1000LU + 100 * 1000000LU;
-		pthread_cond_timedwait(&gevpush, &gevlock, &delta);
-		curs_set(0);
-		if (dirty & EV_ERROR) {
-			int col = p;
-			color(COL_RED, COL_BLACK);
-			mvaddstr(row - 1, 0, error);
-			clrtoeol();
-			setcol(col);
-			dirty &= ~EV_ERROR;
-		} else if (dirty & EV_STATUS) {
-			mvaddstr(row - 1, 0, status);
-			clrtoeol();
-			dirty &= ~EV_STATUS;
-		}
-		if (menu == M_MAIN)
-			drawmain();
-		else
-			drawsend();
-		char buf[256];
-		unsigned x = 20;
-		now = old;
-#ifndef LAZY_UPDATE
-		net_get_state(&state);
-#else
-		if (net_get_state(&state)) {
-#endif
-			long diff = 0;
-			if (n == state.transfers)
-				clock_gettime(CLOCK_MONOTONIC, &now);
-			char *ptr = buf;
-			char pdone[80], ptot[80], speed[40];
-			float perc;
-			unsigned i, n = sizeof buf;
-			if (n > col - x) n = col - x;
-			i = snprintf(ptr, n, "transfers: %u", state.transfers);
-			n -= i; ptr += i;
-			if (state.recv[0]) {
-				strtosi(pdone, sizeof pdone, state.ar_off, 3);
-				strtosi(ptot, sizeof ptot, state.ar_size, 3);
-				perc = state.ar_size ? state.ar_off * 100.0f / state.ar_size : 100.0f;
-				diff = state.ar_off - old_state.ar_off;
-				streta(speed, sizeof speed, old, now, diff);
-				i = snprintf(ptr, n, ", recv: %s %s/%s (%.2f%%) %s", state.recv, pdone, ptot, perc, speed);
-				n -= i;
-				ptr += i;
-			}
-			if (state.send[0]) {
-				strtosi(pdone, sizeof pdone, state.as_off, 3);
-				strtosi(ptot, sizeof ptot, state.as_size, 3);
-				perc = state.as_size ? state.as_off * 100.0f / state.as_size : 100.0f;
-				diff = state.as_off - old_state.as_off;
-				streta(speed, sizeof speed, old, now, diff);
-				i = snprintf(ptr, n, ", send: %s %s/%s (%.2f%%) %s", state.send, pdone, ptot, perc, speed);
-				n -= i;
-				ptr += i;
-			}
-			mvaddstr(0, x, buf);
-#ifdef LAZY_UPDATE
-		}
-#endif
-		n = state.transfers;
-		old = now;
-		old_state = state;
-		clrtoeol();
-		mvaddch(row - 1, col - 2, yay[i]);
-		i ^= 1;
-		clrtoeol();
-		move(row - 2, textp);
-		curs_set(1);
-		refresh();
-		while ((key = getch()) != ERR) {
-			if (key == KEY_RESIZE) {
-				reshape();
-				continue;
-			}
-			if (key == KEY_F(2)) {
-				running = 0;
-				break;
-			} else if (key == KEY_F(3))
-				goto_menu(menu == M_MAIN ? M_FILE : M_MAIN);
-			else
-				kbp(key);
-		}
-	}
-unlock:
-	if (pthread_mutex_unlock(&gevlock) != 0)
-		abort();
-	uifree();
-	return 0;
+	drawhdr();
+	return viewmain();
 }
 
-static void goto_menu(unsigned m)
+void goto_menu(unsigned m)
 {
 	if (menu == m) return;
 	if (m == M_FILE) {

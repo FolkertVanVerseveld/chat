@@ -11,6 +11,8 @@
 #define HEIGHT (GLYPH_HEIGHT * 2 * ROW_MIN)
 #define TITLE "chat"
 
+#define stub fprintf(stderr,"%s: stub\n",__func__)
+
 static unsigned win = SMT_RES_INVALID;
 static unsigned gl = SMT_RES_INVALID;
 
@@ -102,4 +104,9 @@ int smtmain(void)
 	}
 end:
 	return 0;
+}
+
+void smthdr(void)
+{
+	stub;
 }

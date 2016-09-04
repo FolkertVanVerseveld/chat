@@ -5,5 +5,6 @@
 
 int smtinit(void);
 int smtmain(void);
+void smthdr(void);
 
 #endif

@@ -65,6 +65,17 @@ extern unsigned io_filei, io_select;
 extern pthread_mutex_t gevlock;
 extern pthread_cond_t  gevpush;
 
+void kbp(int key);
+void histcalc(void);
+void setcol(int col);
+void color(unsigned fg, unsigned bg);
 void reshape(void);
+void drawhdr(void);
+void wrapaddstr(unsigned y, unsigned x, unsigned d, char *str);
+
+int viewmain(void);
+void drawmain(void);
+void drawsend(void);
+void goto_menu(unsigned m);
 
 #endif
