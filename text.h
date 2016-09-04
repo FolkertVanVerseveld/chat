@@ -4,5 +4,7 @@
 /* ncurses frontend */
 
 int txtinit(void);
+void txtfree(void);
+void txtgetdim(int *y, int *x);
 
 #endif

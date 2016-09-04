@@ -4,5 +4,6 @@
 /* graphical oriented frontend */
 
 int smtinit(void);
+int smtmain(void);
 
 #endif

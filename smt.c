@@ -80,11 +80,26 @@ int smtinit(void)
 	ret = smtCreategl(&gl, win);
 	if (ret) goto fail;
 	ret = init();
-	if (ret) goto fail;
-	display();
-	glcheck();
-	smtSwapgl(win);
-	ret = 0;
 fail:
 	return ret;
+}
+
+int smtmain(void)
+{
+	unsigned running = 1;
+	while (running) {
+		unsigned ev;
+		while ((ev = smtPollev()) != SMT_EV_DONE) {
+			switch (ev) {
+			case SMT_EV_QUIT: goto end;
+			case SMT_EV_KEY_DOWN:
+				break;
+			}
+		}
+		display();
+		glcheck();
+		smtSwapgl(win);
+	}
+end:
+	return 0;
 }

@@ -8,20 +8,13 @@
 #include <time.h>
 #include <pthread.h>
 #include <ncurses.h>
-#include "fs.h"
 #include "string.h"
 #include "net.h"
 #include "smt.h"
+#include "text.h"
 #include "view.h"
 
-static WINDOW *scr = NULL;
-static pthread_mutex_t gevlock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t  gevpush = PTHREAD_COND_INITIALIZER;
-
 static void goto_menu(unsigned m);
-
-struct ls ls;
-static unsigned io_filei = 0, io_select = 0;
 
 // default behavior causes deadlock when run in UI thread
 #undef nschk
@@ -122,7 +115,8 @@ static inline void errorf(const char *format, ...)
 }
 
 static void wrapaddstr(unsigned y, unsigned x, unsigned d, char *str)
-{ if (d >= col) {
+{
+	if (d >= col) {
 		sprintf(error, "wrap error: d > col: d=%u,col=%u", d, col);
 		dirty |= EV_ERROR;
 		return;
@@ -234,10 +228,16 @@ static void uihdr(void)
 	refresh();
 }
 
-static void reshape(void)
+static void uigetdim(int *y, int *x)
+{
+	if (!(cfg.mode & MODE_GUI))
+		txtgetdim(y, x);
+}
+
+void reshape(void)
 {
 	int y, x;
-	getmaxyx(scr, y, x);
+	uigetdim(&y, &x);
 	clear();
 	if (y < ROW_MIN || x < COL_MIN) {
 		mvaddstr(0, 0, "tty too small");
@@ -368,56 +368,12 @@ static void kbp(int key)
 
 static void uifree(void)
 {
-	ls_free(&ls);
-	if (scr) {
-		delwin(scr);
-		scr = NULL;
-	}
-	endwin();
+	txtfree();
 }
 
 static int uiinit(void)
 {
-	const char *err = "unknown";
-	if (scr) return 1;
-	scr = initscr();
-	if (!scr) {
-		err = "no screen available";
-		goto fail;
-	}
-	reshape();
-	if (has_colors() == FALSE) {
-		err = "no colors";
-		goto fail;
-	}
-	start_color();
-	cbreak();
-	keypad(scr, TRUE);
-	noecho();
-	nonl();
-	halfdelay(1);
-	clear();
-	unsigned fc, bc, p, i;
-	for (bc = 0, i = p = 1, fc = COL_COUNT - 2; i < COL_COUNT; ++i, --fc, ++p)
-		if (init_pair(p, fc, bc) == ERR) {
-			err = "init_pair failed";
-			goto fail;
-		}
-	for (++bc; bc < COL_COUNT; ++bc)
-		for (i = 0, fc = COL_COUNT - 1; i < COL_COUNT; ++i, --fc, ++p)
-			if (init_pair(p, fc, bc) == ERR) {
-				err = "init_pair failed";
-				goto fail;
-			}
-	for (i = 0; i < HISTSZ; ++i) {
-		hist[i][0] = '\0';
-		hista[i] = 0;
-	}
-	return 0;
-fail:
-	uifree();
-	fprintf(stderr, "%s\n", err);
-	return 1;
+	return (cfg.mode & MODE_GUI) ? smtinit() : txtinit();
 }
 
 static void drawmain(void)
@@ -484,10 +440,6 @@ int uimain(void)
 	struct timespec delta;
 	int key, running = 0;
 	const char *yay = "+-";
-	if (cfg.mode & MODE_GUI) {
-		if (smtinit())
-			return 1;
-	}
 	if (uiinit())
 		return 1;
 	running = 1;

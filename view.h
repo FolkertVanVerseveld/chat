@@ -1,9 +1,11 @@
 #ifndef VIEW_H
 #define VIEW_H
 
-#include "net.h"
 #include "config.h"
+#include "fs.h"
+#include "net.h"
 #include <time.h>
+#include <pthread.h>
 
 /* internal user interface components
 that do not get exposed through ui.h */
@@ -56,5 +58,13 @@ extern unsigned histn, histi, histip, histscroll;
 #define M_FILE 1
 
 extern unsigned menu;
+
+extern struct ls ls;
+extern unsigned io_filei, io_select;
+
+extern pthread_mutex_t gevlock;
+extern pthread_cond_t  gevpush;
+
+void reshape(void);
 
 #endif

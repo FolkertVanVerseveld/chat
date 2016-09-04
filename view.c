@@ -14,3 +14,9 @@ time_t histt[HISTSZ];
 unsigned histn = 0, histi = 0, histip, histscroll;
 
 unsigned menu = M_MAIN;
+
+struct ls ls;
+unsigned io_filei = 0, io_select = 0;
+
+pthread_mutex_t gevlock = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t  gevpush = PTHREAD_COND_INITIALIZER;
